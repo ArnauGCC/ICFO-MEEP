@@ -1,0 +1,99 @@
+ICFO - Teoria:
+
+Commands:
+    h5topng [-d comp] -t 0:N_instants_temps -R -Zc dkbluered -a yarg -A *.h5 [*.h5 ...]
+        Quan es fa el run de la simulació, si es posa la opció: mp.output_[epsilon | ez | ...]
+        llavors es crea un fitxer amb els valors corresponents, executant aquesta commanda 
+        es creen els pngs corresponents:
+            -t n_ini:n_fi:  indica els instants de temps que es volen representar en pngs
+            -R:             Assegura la consistència de colors entre imatges (min i max totals)
+            -Z:             Center the color scale on the value zero in the data
+            -c colormap:    Usar mapa de color (default: B/W)
+            -a opacity:     Opacitat del colormap: yarg (transparent black to opaque white),
+            -A file:        Especificar arxius  [A vegades s'enfada--> posar quan hi ha 2 arxius]
+            -d comp:        Especifica la component a visualtizar (real - imag) [h5ls nom.ls per info]
+            
+    magick *.png nom.gif
+        crea el GIF
+    
+    feh -a nom.gif
+    gifview --geometry NxN nom.gif
+        veure el GIF (espai per passar de frame, [r]einiciar, [a]nimar)
+
+    python3 -m folder.nom.py
+
+    export OMP_NUM_THREADS=14
+
+    du -sh * .[^.]* 2>/dev/null | sort -h | tail -20
+        Buscar arxius pesats (grans)
+
+
+
+    
+MEEP:
+    Paràmetres:
+        Mínim 8 píxels per longitud d'ona (comprovar els diferents medis)
+
+
+    Funcions útils:
+        sim.use_output_directory()
+            Crea una nova carpeta per posar tots els arxius que es creen durant la execució
+
+        sim.reset_meep()
+            Reseteja
+        
+        [Exemple] sim.run(mp.at_every(0.6 , mp.output_png(mp.Ez, "-Zc dkbluered")), until=200)
+            Crea directament els arxius png en comptes de crear el *.h5
+            !!!COMPTE!!! En aquest cas no es pot utilitzar el -R ja que els arxius es van creant
+            a mesura que es va executant, per tant es van ajustant els colors a cada frame
+
+        [Exemple] sim.run(mp.in_volume(mp.Volume(mp.Vector3(0,-3.5), size=mp.Vector3(16,0)), 
+                                       mp.to_appended("ez-slice", mp.output_efield_z)), until=200)
+            Per veure una secció de la simulació es selecciona el volum concret, equivalentment:
+
+                def get_slice(sim):
+                    vals.append(sim.get_array(center=mp.Vector3(0,-3.5), 
+                                              size=mp.Vector3(16,0), 
+                                              component=mp.Ez))
+
+                sim.run(mp.at_beginning(mp.output_epsilon),
+                        mp.at_every(0.6, get_slice),
+                        until=200)
+
+        
+    Funcions més usades dins el simulation.run() [són cumulatives]:
+        meep.at_every()
+        meep.to_appended()
+        meep.in_volume()
+
+
+
+
+    
+
+
+
+
+RESUM photonic crystals book
+
+Introduccio:
+
+    Optical lattice: Com les xarxes cristalines químiques, arrays d'atoms generades amb làsers.
+
+    Photonic crystals: Xarxes de diferents medis (amb índexos de refracció diferents) --> otical lattice. 
+        Poden ser de diverses dimensions (1, 2 o 3).
+
+    Photomic band gaps: Són les bandes de longitud d'ona per les quals els cristalls no deixen propagar  les ones.
+    
+    Multilayer dielectric mirror: Tal cual el nom és un exemple de cristall fotònic unidimensional.
+
+    Quarter-wave stack: Literalment una pila de capes que alternen índexos de refracció alts i baixos de 
+        longitud d'un quart de la longitud d'ona de la freqüència buscada a reflectar [és un multilayer dielectric mirror].
+    
+    Omnidirectional reflector: Materials dissenyats per reflectar llum amb qualsevol angle d'incidència i polarització.
+
+    Complete photonic band gap: Rang de freqüències pel que no es propaga una ona qualsevol, amb qualsevol polarització, 
+    direcció i de qualsevol font (són sempre reflectors omnidireccionals).
+
+
+
