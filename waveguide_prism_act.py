@@ -7,7 +7,7 @@ from matplotlib.ticker import MultipleLocator
 
 
 """ PARAMETERS """
-alpha_deg = 45                          # triangle angle degrees
+alpha_deg = 15                          # triangle angle degrees
 n = 2.00                                # index prism
 dpml = 1                                # thickness of PML
 pad = 0.5                               # pad between prism and waveguide
@@ -41,7 +41,7 @@ src = [mp.GaussianBeamSource(
         src=mp.GaussianSource(fcen, fwidth=df),
         center=mp.Vector3(-sx/2 + dpml, sy/2 - source_size/2),
         size=mp.Vector3(0, source_size),
-        beam_x0=sx*k/4,                                # relatiu al centre de la font
+        beam_x0=sx*k/4,                                 # relatiu al centre de la font
         beam_kdir=k,
         beam_w0=1,                                      # beam waist
         beam_E0=mp.Vector3(0, 0, 1),
@@ -59,7 +59,7 @@ sim = mp.Simulation(cell_size=mp.Vector3(sx, sy),
 nfreq = 1500
 dft_pt = mp.Vector3(prism_length/2 + offsx, wg_y)
 dft_region = sim.add_dft_fields([mp.Ez], fcen, df, nfreq, center=dft_pt, size=mp.Vector3(y=wg_width))
-"""
+
 sim.run(mp.at_beginning(mp.output_epsilon),
         mp.at_every(1, mp.to_appended("ez", mp.output_efield_z)),
         until=260
@@ -95,7 +95,6 @@ if mp.am_master():
         plt.gca().xaxis.set_major_locator(MultipleLocator(df*0.1))
         plt.show()
 
-"""
 
 sim.plot2D(fields=mp.Ez,
         eps_parameters={'alpha':0.8, 'cmap':'binary', 'interpolation':'none'},

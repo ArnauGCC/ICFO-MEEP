@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import math
 
 dpml = 1        # thickness of PML
-sxy = 12        # cell size
+sxy = 32        # cell size
 freq = 0.8
 n_default = 1.5
 theta_inc = math.asin(1/n_default)
@@ -41,7 +41,7 @@ sim = mp.Simulation(cell_size=mp.Vector3(sxy, sxy),
                      default_material=mp.Medium(index=n_default)
                      )
 
-sim.run(until=20)
+sim.run(until=30)
 
 sim.plot2D(fields=mp.Ez,
            eps_parameters={'alpha':0.8, 'cmap':'binary', 'interpolation':'none'},

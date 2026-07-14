@@ -18,7 +18,7 @@ gamma = 0.65
 
 
 sxy = prism_length + 2*dpml             # cell size
-prism = create_ideal_prism(alpha_deg, n, prism_length, sxy, offsx)
+prism = create_ideal_prism(alpha_deg, n, prism_length, offsx)
 wg = create_h_waveguide(-pad - wg_width/2, wg_width, n)
 
 
