@@ -1,21 +1,21 @@
 import meep as mp
 import math
 
-def create_ideal_prism(alpha_deg, n, left_vertex:mp.Vector3, sx):
+def create_ideal_prism(alpha_deg, n, left_vertex:mp.Vector3, sx, sy):
         # Implementation for creating an ideal prism (with a triangular cross-section).
 
         alpha = math.radians(alpha_deg)         # triangle angle
 
         height = (sx/2 - left_vertex.x) * math.tan(alpha) + left_vertex.y
         base_prism = [mp.Vector3(sx/2, left_vertex.y, -sx/2), 
-                      mp.Vector3(sx/2, height if height < sx/2 else sx/2, -sx/2)]
+                      mp.Vector3(sx/2, height if height < sy/2 else sy/2, -sx/2)]
 
-        if height > sx/2:
-                base_prism.append(mp.Vector3(left_vertex.x + (sx/2 - left_vertex.y)/math.tan(alpha), sx/2, -sx/2))
+        if height > sy/2:
+                base_prism.append(mp.Vector3(left_vertex.x + (sy/2 - left_vertex.y)/math.tan(alpha), sy/2, -sx/2))
 
 
         if left_vertex.x < -sx/2:
-                base_prism.append(mp.Vector3(-sx/2, (-sx/2 - left_vertex.x )*math.tan(alpha), -sx/2))
+                base_prism.append(mp.Vector3(-sx/2, (-sx/2 - left_vertex.x )*math.tan(alpha) + left_vertex.y, -sx/2))
                 base_prism.append(mp.Vector3(-sx/2, left_vertex.y, -sx/2))
 
         else:   base_prism.append(mp.Vector3(left_vertex.x, left_vertex.y, -sx/2))
