@@ -27,6 +27,8 @@ Commands:
     du -sh * .[^.]* 2>/dev/null | sort -h | tail -20
         Buscar arxius pesats (grans)
 
+    export PATH=/usr/local/meep-deprecated/envs/mp/bin:$PATH
+
 
 
     

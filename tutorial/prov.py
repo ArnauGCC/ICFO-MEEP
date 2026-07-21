@@ -21,7 +21,7 @@ sim = mp.Simulation(cell_size=cell,
                     sources=sources,
                     resolution=resolution)
 
-sim.run(until=200)
+sim.run(mp.at_every(1, mp.to_appended("ez", mp.output_efield_z)), until=200)
 
 
 sim.plot2D(fields=mp.Ez,
