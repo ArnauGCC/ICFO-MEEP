@@ -7,6 +7,24 @@ from matplotlib.ticker import MultipleLocator
 from scipy.optimize import brentq
 
 
+"""
+Adds Flux Regions to check where is the division between copled_fr and refl_fr
+"""
+def do_check_fr(sim, sx, fr_pad, sy, refl_fr_v_size, wg_fr_y, wg_fr_size):
+	check = [
+		mp.FluxRegion(
+				center=mp.Vector3(sx/2-dpml - fr_pad, sy/2 - fr_pad - dpml - refl_fr_v_size),
+				size=mp.Vector3(x=100)
+				),
+	
+		mp.FluxRegion(center=mp.Vector3(sx/2 - dpml - fr_pad, wg_fr_y + wg_fr_size/2), size=mp.Vector3(x=100))
+		]
+	sim.add_flux(1, 0, 1, *check)
+
+
+"""
+Function to compute n_eff of the waveguide fundamental mode
+"""
 def f(x, n, d):
     return (
         np.pi * d * np.sqrt(n**2 - x**2)
@@ -15,43 +33,214 @@ def f(x, n, d):
         )
     )
 
+
+"""
+Plots the graphics of the fluxes
+"""
+def do_plots_(df, freqs, coupled_flux, refl_flux, src_flux, forward):
+	if compute_power:
+		plt.figure()
+		plt.plot(freqs,coupled_flux)
+		plt.xlabel(r'frequency $f (kHz)$')
+		plt.ylabel("Flux")
+		plt.title("Coupled SPD")
+		plt.grid(True, which="both", alpha=0.3)
+		plt.gca().xaxis.set_major_locator(MultipleLocator(df*0.1))
+
+
+		plt.figure()
+		plt.plot(freqs,refl_flux)
+		plt.xlabel(r'frequency $f (kHz)$')
+		plt.ylabel("Flux")
+		plt.title("Reflected SPD")
+		plt.grid(True, which="both", alpha=0.3)
+		plt.gca().xaxis.set_major_locator(MultipleLocator(df*0.1))
+
+		plt.figure()
+		plt.plot(freqs,src_flux)
+		plt.xlabel(r'frequency $f (kHz)$')
+		plt.ylabel("Flux")
+		plt.title("Source SPD")
+		plt.grid(True, which="both", alpha=0.3)
+		plt.gca().xaxis.set_major_locator(MultipleLocator(df*0.1))
+
+	if compute_modes_coeff:
+		plt.figure()
+		plt.plot(freqs,forward)
+		plt.xlabel(r'frequency $f (kHz)$')
+		plt.ylabel("Power band 1")
+		plt.title("Energy for fundamental mode")
+		plt.grid(True, which="both", alpha=0.3)
+		plt.gca().xaxis.set_major_locator(MultipleLocator(df*0.1))
+
+	plt.show()
+
+	if compute_power:
+		plt.figure()
+		plt.plot(freqs,np.divide(refl_flux, src_flux))
+		plt.xlabel(r'frequency $f (kHz)$')
+		plt.ylabel("Flux")
+		plt.title("Reflected/Source SPD")
+		plt.grid(True, which="both", alpha=0.3)
+		plt.gca().xaxis.set_major_locator(MultipleLocator(df*0.1))
+
+		plt.figure()
+		plt.plot(freqs,np.divide(coupled_flux, src_flux))
+		plt.xlabel(r'frequency $f (kHz)$')
+		plt.ylabel("Flux")
+		plt.title("Coupled/Source SPD")
+		plt.grid(True, which="both", alpha=0.3)
+		plt.gca().xaxis.set_major_locator(MultipleLocator(df*0.1))
+
+	if compute_modes_coeff:
+		plt.figure()
+		plt.plot(freqs,np.divide(forward, src_flux))
+		plt.xlabel(r'frequency $f (kHz)$')
+		plt.ylabel("Power")
+		plt.title("WG_fundamental_mode/Source SPD")
+		plt.grid(True, which="both", alpha=0.3)
+		plt.gca().xaxis.set_major_locator(MultipleLocator(df*0.1))
+	
+	plt.show()
+
+
+"""
+Computes if the region given has reached a stable (converged) state, 
+this is, there are no significant fluctuations of the energy inside the region 
+in some time (window)
+
+There must be some fields to reach a converged state
+"""
+def make_stop_when_converged(center, size,	# Energy object
+							 window=10,
+							 tolerance=1e-6,
+							 min_field=1e-6):
+
+	energy_history = []
+
+	def stop_when_field_const(sim):
+		Ez = sim.get_array(center=center, size=size, component=mp.Ez)
+		energy = np.sum(np.abs(Ez)**2)
+
+		energy_history.append(energy)
+
+		if len(energy_history) < 2*window:
+			return False
+
+		avg1 = np.mean(energy_history[-2*window:-window], axis=0)
+		avg2 = np.mean(energy_history[-window:], axis=0)
+
+		# Do not check convergence before energy has arrived
+		if np.max(np.abs(avg2)) < min_field:
+			return False
+
+		error = np.mean(np.abs(avg2 - avg1) / (np.abs(avg1) + 1e-20))
+#		if i%10==0:	print("ERROR: ", error)
+			
+		return error < tolerance
+
+	return stop_when_field_const
+
+
 """EXECUTION"""
 run_meep = True
+gaussian_src = False
 compute_power = True
-do_plots = True
-compute_modes_coeff = True
-set_manual_inc_angle = False
+do_plots = False
+compute_modes_coeff = False
+set_manual_inc_angle = True
+compute_src_time = False
+compute_src_power = False
 
 
 """ PARAMETERS """
 alpha_deg = 45                          # triangle angle (base - side) degrees
+res_factor = 16							# Number of pixels for wavelength in the highest refraction index 
 n = 1.50                                # index waveguide
 dpml = 2                                # thickness of PML
 pad = 0.375                             # pad between prism and waveguide
-prism_length = 30                       # length of prism
+prism_length = 60                       # length of prism
 offsx = -1.2*prism_length/2             # offset of prism from the center of the cell (== 0 --> left vertex of the prism in the center of the cell)
 offsy = -prism_length/5                 # offset y-axis
 offs_deg = +2.25                        # offset in degrees from critical angle
 df_factor = 0.3							# fwidth of source
-theta_inc = 45                          # if set_manual_inc_angle theta_inc is set
+theta_inc_deg = 45						# if set_manual_inc_angle theta_inc is set to theta_inc_deg
+src_time = 0							# if not gaussian_src and not compute_src_time, continuous source stops after src_time time units
+src_flux= [-1]							# if not compute_src_power and compute power, then must specify src_flux
+
+"""	
+Computes the time necessary to have the source turned on until the simulation 
+has converged (there are no fluctuations --> the energy is constant)
+"""
+def compute_src_time_(sim, stop_condition):
+	sim.run(
+		# mp.at_beginning(mp.output_epsilon),
+		# mp.at_every(1, mp.to_appended("ez", mp.output_efield_z)), 
+		until=stop_condition)
+
+	src_time = sim.meep_time()
+	sim.reset_meep()
+	return src_time
 
 
-def main():
-	fcen = 1
-	wg_width = 0.9/(2*fcen*n)
-	n_p = n + 0.29							# index prism
-	n_eff = brentq(f, 1.01, n-0.01, args=(n, wg_width))
-	df = fcen*df_factor
+"""
+Crea les Flux Regions on calcular Poyinting o energia:
+	coupled_fr:	Flux que es correspon amb l'energia acoblada (canviar el paràmetre fr_division_y per ajustar
+				els camps que s'agafen com a radiats o com a reflectats)
 
-	alpha = math.radians(alpha_deg)         # triangle angle
-	if not set_manual_inc_angle:
+	wg_fr:		Flux que es transmet per la guia d'ona, s'agafa tota l'ona evanescent (fins a 3 vegades 
+				l'amplada de la guia)
+
+	refl_fr:	Flux que es correspon amb l'ona reflectada
+"""
+def create_flux_regions(sx, sy, wg_y, wg_width, sim):
+	# Aprox l'ona evanescent arriba a 3 vegades l'amplada de la guia d'ona
+	fr_pad = 0.5					# frame region pad
+
+	# fr_division_y must be always lower than sy/2 
+	fr_division_y = sy/6
+
+	# Tros que entra de la Flux Region de la guia d'ona dins el prisma
+	wg_fr_in_prism = fr_division_y - (wg_y + wg_width/2 + pad)
+
+	# Tamany de la Flux Region reflexada vertical
+	refl_fr_v_size = sy/2-offsy - fr_pad - dpml - wg_fr_in_prism
+
+	wg_fr_size = fr_division_y - (wg_y - 3*wg_width)
+	wg_fr_y = wg_y - 3*wg_width + wg_fr_size/2
+
+	coupled_fr = mp.FluxRegion(center=mp.Vector3(sx/2 - dpml - fr_pad, wg_fr_y), size=mp.Vector3(y=wg_fr_size))
+	wg_fr = mp.FluxRegion(center=mp.Vector3(sx/2 - dpml - fr_pad, wg_y), size=mp.Vector3(y=3*wg_width))
+	refl_fr = [
+				mp.FluxRegion(
+					center=mp.Vector3(sx/2-dpml - fr_pad, sy/2 - fr_pad - dpml - refl_fr_v_size/2),
+					size=mp.Vector3(y=refl_fr_v_size)
+					),
+				mp.FluxRegion(
+					center=mp.Vector3(sx/4 - dpml - fr_pad, sy/2 - fr_pad - dpml),
+					size=mp.Vector3(x=sx/2)
+				)]
+
+	# Mostra una Flux Region que marca la divisió entre la Flux Region de l'ona acoblada i de l'ona reflexada
+	if not run_meep and do_plots and compute_power: 
+		do_check_fr(sim, sx, fr_pad, sy, refl_fr_v_size, wg_fr_y, wg_fr_size)
+
+
+	return coupled_fr, wg_fr, refl_fr
+
+
+def compute_initial_parameters(alpha, wg_width, fcen, df, n_p):
+	if set_manual_inc_angle:
+		theta_inc = math.radians(theta_inc_deg)	
+	else:
+		n_eff = brentq(f, 1.01, n-0.01, args=(n, wg_width))
 		theta_inc = math.asin( math.sin(math.asin(n_eff/n_p) - alpha) * n_p) + alpha
 		theta_inc += math.radians(offs_deg)
-
+	
 	k = mp.Vector3(1).rotate(mp.Vector3(0, 0, -1), theta_inc)
 
 	sx = prism_length + 2*dpml                              # cell size x-axis
-	sy = (int)(1.5 * prism_length * math.atan(alpha))       # cell size y-axis (with 1.5 scale margin)
+	sy = int(1.5 * prism_length * math.atan(alpha))       	# cell size y-axis (with 1.5 scale margin)
 	prism = create_ideal_prism(alpha_deg, n_p, mp.Vector3(offsx, offsy), sx, sy)
 
 	wg_y = -pad - wg_width/2 + offsy
@@ -62,24 +251,61 @@ def main():
 	src_center = mp.Vector3(-sx/2 + dpml, sy/3 - src_size.y/2 - dpml)
 
 	src = [mp.GaussianBeam2DSource(
-		src=mp.GaussianSource(fcen, fwidth=df),
+		src=mp.GaussianSource(fcen, fwidth=df) if gaussian_src else mp.ContinuousSource(fcen),
 		center=src_center,
 		size=src_size,
-		beam_x0=src_center + sx*k/4,                                 # relatiu al centre de la font
+		beam_x0=src_center + sx*k/4,					# relatiu al centre de la font
 		beam_kdir=k,
-		beam_w0=40,                                      # beam waist
+		beam_w0=40,										# beam waist
 		beam_E0=mp.Vector3(0, 0, 1),
 		)]
 
+	return k, sx, sy, prism, wg_y, wg, src_size, src_center, src
 
-	resolution = n_p*20*fcen
-	fr_pad = 0.5										# frame region pad
-	nfreq = 200
-	src_fr = mp.FluxRegion(center=src_center + mp.Vector3(x = fr_pad), size=src_size*1.8)
 
+def main(fcen, wg_factor, src_time=src_time, src_flux=src_flux):
+	#fcen = 0.4
+	wg_width = wg_factor/(2*fcen*n)
+	n_p = n + 0.30							# index prism
+	df = fcen*df_factor
+	resolution = int(n_p*res_factor*fcen)
+
+	alpha = math.radians(alpha_deg)         # triangle angle
+
+	k, sx, sy, prism, wg_y, wg, src_size, src_center, src = compute_initial_parameters(alpha, wg_width, fcen, df, n_p)
+	
+
+	"""If not gaussian Source, get time until converged state"""
+	if not gaussian_src and run_meep:
+		if compute_src_time:
+			sim = mp.Simulation(cell_size=mp.Vector3(sx, sy),
+							geometry=[prism, wg],
+							sources=src,
+							resolution=resolution,
+							boundary_layers=[mp.PML(dpml)])
+
+			# Region of convergence is the reflected wave (the wg might not have any fiels inside --> no convergence)
+			src_time = compute_src_time_(sim,  make_stop_when_converged(	mp.Vector3(sx/4, (sy/2 - offsy)/2), 
+																		mp.Vector3(sx/2, (sy/2 - offsy)), 
+																		window=int(2*2*resolution/fcen)))
+
+		src = [mp.GaussianBeam2DSource(
+				src=mp.ContinuousSource(fcen, end_time=src_time),
+				center=src_center,
+				size=src_size,
+				beam_x0=src_center + sx*k/4,                     # relatiu al centre de la font
+				beam_kdir=k,
+				beam_w0=40,                                      # beam waist
+				beam_E0=mp.Vector3(0, 0, 1),
+				)]
+
+
+	src_fr = mp.FluxRegion(center=src_center + mp.Vector3(x = 0.5), size=src_size*1.8)
+	nfreq = 200 if gaussian_src else 1
+	if not gaussian_src:	df = 0
 
 	"""RESET to get Source Flux"""
-	if (compute_power or compute_modes_coeff) and run_meep:
+	if run_meep and compute_src_power:
 		sim = mp.Simulation(cell_size=mp.Vector3(sx, sy),
 							sources=src,
 							resolution=resolution,
@@ -88,9 +314,8 @@ def main():
 			
 		src_region = sim.add_flux(fcen, df, nfreq, src_fr)
 
-		sim.run(mp.at_beginning(mp.output_epsilon),
-				until_after_sources=2)
-		
+		sim.run(until_after_sources=2)
+
 		src_flux = mp.get_fluxes(src_region)
 		sim.reset_meep()
 
@@ -102,52 +327,45 @@ def main():
 				boundary_layers=[mp.PML(dpml)]
 				)
 
-	wg_mult = 4
 
-	wg_fr = mp.FluxRegion(center=mp.Vector3(sx/2 - dpml - fr_pad, wg_y), size=mp.Vector3(y=wg_mult*wg_width))
-	refl_fr = [
-				mp.FluxRegion(
-					center=mp.Vector3(sx/2-dpml - fr_pad, sy/4 + (offsy - dpml)/2 + wg_mult*wg_width/2),
-					size=mp.Vector3(y=sy/2-offsy - 2*fr_pad - dpml - wg_mult*wg_width)
-					), 
-				mp.FluxRegion(
-					center=mp.Vector3(sx/4 - dpml - fr_pad, sy/2 - fr_pad - dpml),
-					size=mp.Vector3(x=sx/2)
-				)]
+	coupled_fr, wg_fr, refl_fr = create_flux_regions(sx, sy, wg_y, wg_width, sim)
+	
 
 	if compute_power:
-		wg_region = sim.add_flux(fcen, df, nfreq, wg_fr)
+		coupled_region = sim.add_flux(fcen, df, nfreq, coupled_fr)
 		refl_region = sim.add_flux(fcen, df, nfreq, *refl_fr)
 
-	elif compute_modes_coeff:
+	if compute_modes_coeff:
 		wg_region = sim.add_flux(fcen, df, nfreq, wg_fr)
 
+
+	"""RUN SIMULATION"""
 	if run_meep:
-	
 		sim.run(mp.at_beginning(mp.output_epsilon),
 				mp.at_every(1, mp.to_appended("ez", mp.output_efield_z)), 
-				until=mp.stop_when_energy_decayed(dt=int(1/df), decay_by=1e-6))
+				until=mp.stop_when_energy_decayed(dt=int(5/fcen), decay_by=1e-6 if gaussian_src else 1e-2))
 
-		
-		if compute_power:
-			wg_flux = mp.get_fluxes(wg_region)
-			refl_flux = mp.get_fluxes(refl_region)
-			freqs = mp.get_flux_freqs(refl_region)
 
-			if compute_modes_coeff: 
+		if gaussian_src:
+
+			if compute_modes_coeff:
+				freqs = mp.get_flux_freqs(wg_region)
 				res = sim.get_eigenmode_coefficients(wg_region, bands=[1])
 				coeff = res.alpha
 				forward = np.abs(coeff[0, :, 0])**2
 
-				#return np.sum(forward)/np.sum(src_flux)
-			
+			if compute_power:
+				coupled_flux = mp.get_fluxes(coupled_region)
+				refl_flux = mp.get_fluxes(refl_region)
+				freqs = mp.get_flux_freqs(refl_region)
 
-			if mp.am_master():
+			if compute_power and compute_modes_coeff:
 				np.savez(
 					f"DIFF_TMP-off{offs_deg}_fcen{fcen:.2f}_w{wg_width:.2f}_al{alpha_deg}_n{n}_pad{pad}_df{df_factor}.npz",
 					freqs=freqs,
 					src_flux=src_flux,
-					wg_flux=wg_flux,
+					wg_flux_1st_mode=forward,
+					coupled_flux=coupled_flux,
 					refl_flux=refl_flux,
 					resolution=resolution,
 					fcen=fcen,
@@ -155,70 +373,26 @@ def main():
 					prism_length=prism_length
 				)
 
-				if do_plots:
-					plt.figure()
-					plt.plot(freqs,wg_flux)
-					plt.xlabel(r'frequency $f (kHz)$')
-					plt.ylabel("Flux")
-					plt.title("Waveguide SPD")
-					plt.grid(True, which="both", alpha=0.3)
-					plt.gca().xaxis.set_major_locator(MultipleLocator(df*0.1))
 
-
-					plt.figure()
-					plt.plot(freqs,refl_flux)
-					plt.xlabel(r'frequency $f (kHz)$')
-					plt.ylabel("Flux")
-					plt.title("Reflected SPD")
-					plt.grid(True, which="both", alpha=0.3)
-					plt.gca().xaxis.set_major_locator(MultipleLocator(df*0.1))
-
-					plt.figure()
-					plt.plot(freqs,src_flux)
-					plt.xlabel(r'frequency $f (kHz)$')
-					plt.ylabel("Flux")
-					plt.title("Source SPD")
-					plt.grid(True, which="both", alpha=0.3)
-					plt.gca().xaxis.set_major_locator(MultipleLocator(df*0.1))
-
-					if compute_modes_coeff:
-						plt.figure()
-						plt.plot(freqs,forward)
-						plt.xlabel(r'frequency $f (kHz)$')
-						plt.ylabel("Power band 1")
-						plt.title("Energy for fundamental mode")
-						plt.grid(True, which="both", alpha=0.3)
-						plt.gca().xaxis.set_major_locator(MultipleLocator(df*0.1))
-
-					plt.show()
-		
-					plt.figure()
-					plt.plot(freqs,np.divide(refl_flux, src_flux))
-					plt.xlabel(r'frequency $f (kHz)$')
-					plt.ylabel("Flux")
-					plt.title("Reflected/Source SPD")
-					plt.grid(True, which="both", alpha=0.3)
-					plt.gca().xaxis.set_major_locator(MultipleLocator(df*0.1))
-
-					plt.figure()
-					plt.plot(freqs,np.divide(wg_flux, src_flux))
-					plt.xlabel(r'frequency $f (kHz)$')
-					plt.ylabel("Flux")
-					plt.title("Waveguide/Source SPD")
-					plt.grid(True, which="both", alpha=0.3)
-					plt.gca().xaxis.set_major_locator(MultipleLocator(df*0.1))
-		
-					plt.show()
-
-		elif compute_modes_coeff: 
+			if mp.am_master() and do_plots:
+				do_plots_(df, freqs, coupled_flux, refl_flux, src_flux, forward)
+				
+		else: 
+			if compute_modes_coeff:
 				res = sim.get_eigenmode_coefficients(wg_region, bands=[1])
 				coeff = res.alpha
 				forward = np.abs(coeff[0, :, 0])**2
 
-				return np.sum(forward)/np.sum(src_flux)
+				return forward[0]
+
+			if compute_power:
+				coupled_flux = mp.get_fluxes(coupled_region)
+				refl_flux = mp.get_fluxes(refl_region)
+
+				return coupled_flux[0]/src_flux[0]
 			
 
-	if not run_meep and do_plots:
+	if not run_meep or do_plots:
 		sim.plot2D(fields=mp.Ez,
 			eps_parameters={'alpha':0.8, 'cmap':'binary', 'interpolation':'none'},
 			field_parameters={'alpha':0.8, 'cmap':'RdBu', 'interpolation':'spline36'},
@@ -228,37 +402,157 @@ def main():
 		plt.show()
 
 
-"""
-offsets = np.linspace(-5,5,41)
-[np.float64(0.030349811445287814), np.float64(0.03328358245158583), np.float64(0.036304559702988085), np.float64(0.03939857078938648), np.float64(0.04255066705083255), np.float64(0.045745262088528464), np.float64(0.04896627469403276), np.float64(0.05219727416030071), np.float64(0.05542162599696516), np.float64(0.05862263617034765), np.float64(0.06178369212108903), np.float64(0.06488839897278853), np.float64(0.06792070952709553), np.float64(0.07086504666010171), np.float64(0.07370641813335992), np.float64(0.07643052066393524), np.float64(0.07902383542593608), np.float64(0.08147371298155252), np.float64(0.08376844767000557), np.float64(0.08589734153733151), np.float64(0.0878507578255884), np.float64(0.08962016421345323), np.float64(0.0911981660972766), np.float64(0.0925785302764318), np.float64(0.09375619946522658), np.float64(0.09472729808467614), np.float64(0.09548912981579522), np.float64(0.09604016739744978), np.float64(0.09638003515102275), np.float64(0.09650948470187334), np.float64(0.09643036435078371), np.float64(0.09614558255445406), np.float64(0.0956590657520411), np.float64(0.09497571146546374), np.float64(0.09410133617040803), np.float64(0.09304261919641589), np.float64(0.09180704249577411), np.float64(0.09040282683123879), np.float64(0.08883886474147326), np.float64(0.08712465068960408), np.float64(0.08527020877601442)]
-
-pads = np.linspace(0.3725,0.3775,5)
-[np.float64(0.10110430134250178), np.float64(0.10138044307438494), np.float64(0.10160857904883383), np.float64(0.10124620533198485), np.float64(0.10093752621688946)]
-
-prism_factor = np.linspace(0.25,0.35,6)
-[np.float64(0.059625347816201595), np.float64(0.0874101160235997), np.float64(0.09957728003021563), np.float64(0.09450362750670986), np.float64(0.07466947879140647), np.float64(0.04844309278009033)]
+def write_output(text):
+	if mp.am_master():
+		with open("output.txt", "a") as file:
+			file.write(str(text) + "\n")
 
 
+def find_max_efficiency(min_s, max_s, n_steps, freq, stage, src_time, src_flux):
+	write_output("")
+	write_output("STAGE:  " + str(stage))
 
-"""
+	eff = []
+	steps = np.linspace(min_s, max_s, n_steps)
+	write_output("STEPS:")
+	write_output(steps)
+
+	for s in steps:
+		print("EXECUTING MEEP WITH WG_FACTOR = ", s)
+		eff.append(main(freq, s, src_time, src_flux))
+
+	write_output("EFF:")
+	write_output(eff)
+
+	max_v= max(eff)
+	max_i = eff.index(max_v)
+
+	second_v = max(n for n in eff if n != max_v)
+	second_i = eff.index(second_v)
+
+	# The second max is not a neighbour
+	if abs(max_i - second_i) > 1:
+		return find_max_efficiency(min_s, max_s, 2*n_steps, freq, stage+1, src_time, src_flux)
+
+	# Differnce is lower than 1%
+	if abs(max_v - second_v) < 0.01:
+		return max_v, steps[max_i]
+
+	else:
+		step_size = (max_s - min_s) / n_steps
+
+		if max_i == n_steps - 1:
+			return find_max_efficiency(steps[max_i-1], steps[max_i] + step_size, n_steps, stage+1, src_time, src_flux)
+
+		elif max_i == 0:
+			return find_max_efficiency(steps[0] - step_size, steps[1], n_steps, stage+1, src_time, src_flux)
+			
+		elif max_i - second_i > 0:
+			return find_max_efficiency(steps[second_i], steps[max_i] + step_size,
+					   			n_steps if abs(max_v - second_v) > 0.015 or int(n_steps/2) <= 2 
+								else int(n_steps/2), 
+								freq, stage+1, src_time, src_flux)
+		else:
+			return find_max_efficiency(steps[max_i] - step_size, steps[second_i], 
+										n_steps if abs(max_v - second_v) > 0.015 or int(n_steps/2) <= 2 
+										else int(n_steps/2), 
+										freq, stage+1, src_time, src_flux)
+
+
 if __name__ == "__main__":
-	main()
+#	main(1.024, 1.5)
+
+	alpha = math.radians(alpha_deg)
+	f_min = 1
+	f_max = 3
+
+	eff = []
+	wg_factors = []
+	freqs = np.linspace(f_min, f_max, 20)
+	
+
+	for freq in freqs:
+		write_output("FREQUENCY = " + str(freq))
+
+		try:
+			"""Get Source time (worst case --> max wg width)"""
+			resolution = int((n+0.3)*res_factor*freq)
+			k, sx, sy, prism, wg_y, wg, src_size, src_center, src = compute_initial_parameters(alpha, 1.5/(2*freq*n), freq, 0, n+0.3)
+			sim = mp.Simulation(cell_size=mp.Vector3(sx, sy),
+										geometry=[prism, wg],
+										sources=src,
+										resolution=resolution,
+										boundary_layers=[mp.PML(dpml)])
+			
+			src_time = compute_src_time_(sim,  make_stop_when_converged(	mp.Vector3(sx/4, (sy/2 - offsy)/2), 
+																					mp.Vector3(sx/2, (sy/2 - offsy)), 
+																					window=int(2*2*resolution/freq)))
+
+			src = [mp.GaussianBeam2DSource(
+							src=mp.ContinuousSource(freq, end_time=src_time),
+							center=src_center,
+							size=src_size,
+							beam_x0=src_center + sx*k/4,                     # relatiu al centre de la font
+							beam_kdir=k,
+							beam_w0=40,                                      # beam waist
+							beam_E0=mp.Vector3(0, 0, 1),
+							)]
+
+			"""Compute Source flux (always the same)"""
+			sim = mp.Simulation(cell_size=mp.Vector3(sx, sy),
+										sources=src,
+										resolution=resolution,
+										boundary_layers=[mp.PML(dpml)]
+										)
+			
+			src_fr = mp.FluxRegion(center=src_center + mp.Vector3(x = 0.5), size=src_size*1.8)			
+			src_region = sim.add_flux(freq, 0, 1, src_fr)
+
+			sim.run(until_after_sources=2)
+
+			src_flux = mp.get_fluxes(src_region)
+
+			"""Compute max efficiency"""
+			e, wg_f = find_max_efficiency(0.5, 1.5, 8, freq, 0, src_time, src_flux)
+
+			eff.append(e)
+			wg_factors.append(wg_f)
+
+		except Exception as exc:
+			print("---------------------------EXCEPTION------------------------------")
+			write_output(str(exc))
+
+
+		write_output("--------------------------------------------------------------------")	
+
+	
+	write_output("FINAL RESULT:")
+	write_output("FREQS:")
+	write_output(freqs)
+	write_output("EFF:")
+	write_output(eff)
+	write_output("WG_FACTORS:")
+	write_output(wg_factors)
+
+
 
 """
 	is_ok = True
 
-	try:
-		eff = []
-		widths = np.linspace(0.8,1.2,9)
-		for o in widths:
-			print("EXECUTING MEEP WITH WG WIDTH = ", o)
-			eff.append(main(o))
-	
-	except Exception:
-		is_ok = False	
+	#try:
+	eff = []
+	widths = np.linspace(0.4,0.5,2)
+	for o in widths:
+		print("EXECUTING MEEP WITH OFFS DEG = ", o)
+		eff.append(main(o))
 
+#	except Exception:
+#		is_ok = False	
+#		print(Exception)
+#
 	print(eff)
 
+	
 	if is_ok and mp.am_master():
 		plt.figure()
 		plt.plot(widths, eff)

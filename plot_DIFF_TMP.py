@@ -2,7 +2,7 @@ from matplotlib.ticker import MultipleLocator
 import matplotlib.pyplot as plt
 import numpy as np
 
-file_name = "/home/arnaugc/ICFO/MEEP/DIFF_TMP-off0_fcen1.00_w0.30_al45_n1.5_pad0.35_df0.3.npz"
+file_name = "/home/arnaugc/ICFO/MEEP/resultats_prsima/DIFF_TMP-off2.25_fcen1.00_w0.30_al45_n1.5_pad0.375_df0.3.npz"
 data = np.load(file_name)
 
 wg_flux = data["wg_flux"]

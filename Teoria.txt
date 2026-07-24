@@ -27,7 +27,9 @@ Commands:
     du -sh * .[^.]* 2>/dev/null | sort -h | tail -20
         Buscar arxius pesats (grans)
 
-    export PATH=/usr/local/meep-deprecated/envs/mp/bin:$PATH
+    scp agonzalezc@NOP01.icfo.es:/home/agonzalezc/software/file.h5 /home/arnaugc/ICFO/MEEP/
+
+    sudo openfortivpn vpn.icfo.net:443 -u agonzalezc -o codiForti --trusted-cert f5fd42a260ad784e313953d3968c72f98372fc230ae6f48ea96e1c4d98c99b6b
 
 
 
