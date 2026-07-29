@@ -156,18 +156,20 @@ compute_src_power = True
 
 
 """ PARAMETERS """
+eff_params = {							# Parameters that can be used find max efficiency 
+	"wg_factor": 0.9,					# sets the wg_width = wg_factor/(2*fcen*n)
+	"pad": 0.15,						# pad between prism and waveguidem is set if not set_same_pad
+	"offs_deg": +2.50,					# offset in degrees from critical angle
+}
 
 alpha_deg = 45                          # triangle angle (base - side) degrees
 res_factor = 16							# Number of pixels for wavelength in the highest refraction index 
 n = 1.50                                # index waveguide
-pad = 0.17030864				# pad between prism and waveguidem is set if not set_same_pad
 prism_length = 15						# length of prism
 dpml = prism_length/30					# thickness of PML, prism_length/30 should work for any frequency
 offsx = -1.2*prism_length/2             # offset of prism from the center of the cell (== 0 --> left vertex of the prism in the center of the cell)
 offsy = -prism_length/3                 # offset y-axis
-offs_deg = +2.50                        # offset in degrees from critical angle
 df_factor = 0.3							# fwidth of source
-wg_factor = 0.9566326530612245							# sets the wg_width = wg_factor/(2*fcen*n)
 theta_inc_deg = 45						# if set_manual_inc_angle theta_inc is set to theta_inc_deg
 src_time = 80							# if not gaussian_src and not compute_src_time, continuous source stops after src_time time units
 src_flux= [-1]							# if not compute_src_power and compute power, then must specify src_flux
@@ -210,7 +212,7 @@ def create_flux_regions(sx, sy, wg_y, wg_width, sim):
 	fr_division_y = sy*fr_division_y_factor
 
 	# Tros que entra de la Flux Region de la guia d'ona dins el prisma
-	wg_fr_in_prism = fr_division_y - (wg_y + wg_width/2 + pad)
+	wg_fr_in_prism = fr_division_y - (wg_y + wg_width/2 + eff_params["pad"])
 
 	# Tamany de la Flux Region reflexada vertical
 	refl_fr_v_size = sy/2-offsy - fr_pad - dpml - wg_fr_in_prism
@@ -244,7 +246,7 @@ def compute_initial_parameters(alpha, wg_width, fcen, df, n_p):
 	else:
 		n_eff = brentq(f, 1.01, n-0.01, args=(n, wg_width))
 		theta_inc = math.asin( math.sin(math.asin(n_eff/n_p) - alpha) * n_p) + alpha
-		theta_inc += math.radians(offs_deg)
+		theta_inc += math.radians(eff_params["offs_deg"])
 	
 	k = mp.Vector3(1).rotate(mp.Vector3(0, 0, -1), theta_inc)
 
@@ -252,7 +254,7 @@ def compute_initial_parameters(alpha, wg_width, fcen, df, n_p):
 	sy = int(1.5 * prism_length * math.atan(alpha))       	# cell size y-axis (with 1.5 scale margin)
 	prism = create_ideal_prism(alpha_deg, n_p, mp.Vector3(offsx, offsy), sx, sy)
 
-	wg_y = -pad - wg_width/2 + offsy
+	wg_y = -eff_params["pad"] - wg_width/2 + offsy
 	wg = create_h_waveguide(wg_y, wg_width, n)
 
 	src_size = mp.Vector3(y=sy/6 - offsy  if offsx > -sx/2 
@@ -272,16 +274,12 @@ def compute_initial_parameters(alpha, wg_width, fcen, df, n_p):
 	return k, sx, sy, prism, wg_y, wg, src_size, src_center, src
 
 
-def main(fcen, _offs_deg, src_time=src_time, src_flux=src_flux):
+def main(fcen, src_time=src_time, src_flux=src_flux):
 
-	global pad
 	if set_same_pad:	
-		pad = 1/(fcen*6)
-
-	global offs_deg
-	offs_deg = _offs_deg
+		eff_params["pad"] = 1/(fcen*6)
 	
-	wg_width = wg_factor/(2*fcen*n)
+	wg_width = eff_params["wg_factor"]/(2*fcen*n)
 	n_p = n + 0.30							# index prism
 	df = fcen*df_factor
 	resolution = int(n_p*res_factor*fcen)
@@ -377,7 +375,7 @@ def main(fcen, _offs_deg, src_time=src_time, src_flux=src_flux):
 
 			if compute_power and compute_modes_coeff:
 				np.savez(
-					f"DIFF_TMP-off{offs_deg}_fcen{fcen:.2f}_w{wg_width:.2f}_al{alpha_deg}_n{n}_pad{pad}_df{df_factor}.npz",
+					f"DIFF_TMP-off{eff_params["offs_deg"]}_fcen{fcen:.2f}_w{wg_width:.2f}_al{alpha_deg}_n{n}_pad{eff_params["pad"]}_df{df_factor}.npz",
 					freqs=freqs,
 					src_flux=src_flux,
 					wg_flux_1st_mode=forward,
@@ -433,7 +431,7 @@ This function doesn't have to be called
 Computes the maximum efficiency of a given frequency between two values of a parameter
 with known source time and flux 
 """
-def find_max_efficiency_(min_s, max_s, n_steps, freq, stage, src_time, src_flux, param_wg_factor):
+def find_max_efficiency_(param, min_s, max_s, n_steps, freq, stage, src_time, src_flux):
 	write_output("")
 	write_output("STAGE:  " + str(stage))
 
@@ -444,7 +442,8 @@ def find_max_efficiency_(min_s, max_s, n_steps, freq, stage, src_time, src_flux,
 
 	for s in steps:
 		print("EXECUTING MEEP WITH PARAM = ", s)
-		eff.append(main(freq, s, src_time, src_flux))
+		eff_params[param] = s
+		eff.append(main(freq, src_time, src_flux))
 
 	write_output("EFF:")
 	write_output(eff)
@@ -460,31 +459,31 @@ def find_max_efficiency_(min_s, max_s, n_steps, freq, stage, src_time, src_flux,
 
 	# The second max is not a neighbour
 	if abs(max_i - second_i) > 1:
-		return find_max_efficiency_(min_s, max_s, 2*n_steps, freq, stage+1, src_time, src_flux, param_wg_factor)
+		return find_max_efficiency_(param, min_s, max_s, 2*n_steps, freq, stage+1, src_time, src_flux)
 
 	# Differnce is lower than 1%
-	if abs(max_v - second_v) < 0.01 and (stage > 0 or not param_wg_factor):
+	if abs(max_v - second_v) < 0.01 and stage > 0:
 		return max_v, steps[max_i]
 
 	else:
 		step_size = (max_s - min_s) / n_steps
 
 		if max_i == n_steps - 1:
-			return find_max_efficiency_(steps[max_i-1], steps[max_i] + step_size, n_steps, freq, stage+1, src_time, src_flux, param_wg_factor)
+			return find_max_efficiency_(param, steps[max_i-1], steps[max_i] + step_size, n_steps, freq, stage+1, src_time, src_flux)
 
 		elif max_i == 0:
-			return find_max_efficiency_(steps[0] - step_size, steps[1], n_steps, freq, stage+1, src_time, src_flux, param_wg_factor)
+			return find_max_efficiency_(param, steps[0] - step_size, steps[1], n_steps, freq, stage+1, src_time, src_flux)
 			
 		elif max_i - second_i > 0:
-			return find_max_efficiency_(steps[second_i], steps[max_i] + step_size,
+			return find_max_efficiency_(param, steps[second_i], steps[max_i] + step_size,
 								n_steps if abs(max_v - second_v) > 0.015 or int(n_steps/2) <= 2 
 								else int(n_steps/2), 
-								freq, stage+1, src_time, src_flux, param_wg_factor)
+								freq, stage+1, src_time, src_flux)
 		else:
-			return find_max_efficiency_(steps[max_i] - step_size, steps[second_i], 
+			return find_max_efficiency_(param, steps[max_i] - step_size, steps[second_i], 
 										n_steps if abs(max_v - second_v) > 0.015 or int(n_steps/2) <= 2 
 										else int(n_steps/2), 
-										freq, stage+1, src_time, src_flux, param_wg_factor)
+										freq, stage+1, src_time, src_flux)
 
 	
 """
@@ -492,24 +491,19 @@ Computes the maximum efficiency of a given frequency between two wg_factors
 Partial results are printed in the created file output.txt
 Returns the maximum efficieny with the corresponding wg_factor  
 """
-def find_max_efficiency(param_min, param_max, n_steps, freq, param_wg_factor, set_same_pad_=True, coupling=True, same_inc_angle=True):
+def find_max_efficiency(param, param_min, param_max, n_steps, freq):
+	if param not in eff_params:	Exception("Parameter specified is not a key in eff_params.")
+
 	global compute_src_time
 	global compute_src_power
 	global run_meep
 	global gaussian_src
-	global compute_power
 	global do_plots
-	global compute_modes_coeff
-	global set_manual_inc_angle
-	global set_same_pad
 
+	
 	run_meep = True
 	gaussian_src = False
-	compute_power = coupling
 	do_plots = False
-	compute_modes_coeff = not coupling
-	set_manual_inc_angle = same_inc_angle
-	set_same_pad = set_same_pad_
 	compute_src_time = False
 	compute_src_power = False
 	alpha = math.radians(alpha_deg)
@@ -517,7 +511,7 @@ def find_max_efficiency(param_min, param_max, n_steps, freq, param_wg_factor, se
 	try:
 		"""Get Source time"""
 		resolution = int((n+0.3)*res_factor*freq)
-		k, sx, sy, prism, wg_y, wg, src_size, src_center, src = compute_initial_parameters(alpha, wg_factor/(2*freq*n), freq, 0, n+0.3)
+		k, sx, sy, prism, wg_y, wg, src_size, src_center, src = compute_initial_parameters(alpha, eff_params["wg_factor"]/(2*freq*n), freq, 0, n+0.3)
 		sim = mp.Simulation(cell_size=mp.Vector3(sx, sy),
 									geometry=[prism, wg],
 									sources=src,
@@ -553,7 +547,7 @@ def find_max_efficiency(param_min, param_max, n_steps, freq, param_wg_factor, se
 		src_flux = mp.get_fluxes(src_region)
 
 		"""Compute max efficiency"""
-		return find_max_efficiency_(param_min, param_max, n_steps, freq, 0, src_time, src_flux, param_wg_factor)
+		return find_max_efficiency_(param, param_min, param_max, n_steps, freq, 0, src_time, src_flux)
 
 
 
@@ -565,6 +559,36 @@ def find_max_efficiency(param_min, param_max, n_steps, freq, param_wg_factor, se
 	write_output("--------------------------------------------------------------------")	
 	
 
+def raise_exc_list_param_not_empty(param):
+	raise Exception(f"If searching maximum efficiency in function of {param}, then {param}s must be empty.")
+
+def raise_exc_list_len_not_match(param, f_steps, len):
+	raise Exception(f"The length of frequencies ({f_steps}) is different from the length of {param}s ({len}).")
+
+def check_exceptions(param, f_steps, wg_factors_len, pads_len, offs_degs_len):
+	match param:
+		case "wg_factor":
+			if wg_factors_len != 0: raise_exc_list_param_not_empty(param)
+
+		case "pad":
+			if pads_len != 0: raise_exc_list_param_not_empty(param)
+
+		case "offs_deg":
+			if offs_degs_len != 0: raise_exc_list_param_not_empty(param)
+
+		case _:
+			raise Exception("The parameter must be one of the eff_params keys (wg_factor, pad or offs_deg).")
+
+	
+	if wg_factors_len != 0 and  f_steps != wg_factors_len:
+		raise_exc_list_len_not_match(param, f_steps, wg_factors_len)
+
+	elif pads_len != 0 and  f_steps != pads_len:
+		raise_exc_list_len_not_match(param, f_steps, pads_len)
+	
+	elif offs_degs_len != 0 and  f_steps != offs_degs_len:
+		raise_exc_list_len_not_match(param, f_steps, offs_degs_len)
+
 
 """
 In a reange of frequencies, for each frequency (resolution or f_steps must be specified):
@@ -572,38 +596,54 @@ In a reange of frequencies, for each frequency (resolution or f_steps must be sp
 	(the parameter is specified as a parameter of main function)
 	Results are printed in the created file: output.txt (partial results are also printed)
 """
-def compute_max_eff_freq_range(f_min, f_max, f_res, param_min, param_max, param_steps, 
-							   f_steps = None, param_wg_factor = False, set_same_pad = True, 
-							   wg_factors=[], coupling=True, same_inc_angle=True):	
+def compute_max_eff_freq_range(f_min, f_max, f_res, param, param_min, param_max, param_steps,
+							   f_steps = None, wg_factors=[], pads=[], offs_degs=[],
+							   coupling=True, same_inc_angle=True):
+	
+	global compute_power
+	global compute_modes_coeff
+	global set_manual_inc_angle
+	global set_same_pad
+
+	compute_power = coupling
+	compute_modes_coeff = not coupling
+	set_manual_inc_angle = same_inc_angle
+	set_same_pad = len(pads) == 0
+
+
 	eff = []
 	parameters = []
-	global wg_factor
 
 	if f_steps is None:	f_steps = round((f_max - f_min)/f_res) +1 if f_min < f_max else 1
 	freqs = np.linspace(f_min, f_max, f_steps)
 
-	if len(wg_factors) != 0 and  len(freqs) != len(wg_factors):
-		raise Exception(f"The length of frequencies ({len(freqs)}) is different \
-from the length of wg_factors ({len(wg_factors)}).")
+	check_exceptions(param, f_steps, len(wg_factors), len(pads), len(offs_degs))
+
 
 	i = 0
 	for freq in freqs:
 		write_output("FREQUENCY = " + str(freq))
 
 		# To compute correctly the src_time --> wg_factor must be maximum
-		if param_wg_factor:
-			wg_factor = param_max
+		if param == "wg_factor":
+			eff_params[param] = param_max
 
 		elif len(wg_factors) != 0:
-			wg_factor = wg_factors[i]
-			i += 1
+			eff_params["wg_factor"] = wg_factors[i]
+
+		if len(pads) != 0:
+			eff_params["pad"] = pads[i]
+
+		if len(offs_degs) != 0:
+			eff_params["offs_deg"] = offs_degs[i]
+		
 
 		try:
 			
-			e, param = find_max_efficiency(param_min, param_max, param_steps, freq, param_wg_factor, set_same_pad, coupling, same_inc_angle)
+			e, p = find_max_efficiency(param, param_min, param_max, param_steps, freq)
 
 			eff.append(e)
-			parameters.append(param)
+			parameters.append(p)
 
 		except Exception as exc:
 			print("---------------------------EXCEPTION------------------------------")
@@ -611,6 +651,7 @@ from the length of wg_factors ({len(wg_factors)}).")
 
 
 		write_output("--------------------------------------------------------------------")	
+		i += 1
 
 	
 	write_output("FINAL RESULT:")
@@ -618,12 +659,15 @@ from the length of wg_factors ({len(wg_factors)}).")
 	write_output(freqs)
 	write_output("EFF:")
 	write_output(eff)
-	write_output("PARAMETERS:")
+	write_output(f"PARAMETERS: ({param})")
 	write_output(parameters)
+	write_output("")
+	write_output("")
 
 
 
 if __name__ == "__main__":
+	params = list(eff_params.keys())		# params = ["wg_factor", "pad", "offs_deg"]
 
 #	wg_factors = [np.float64(0.7857142857142857), np.float64(0.7576530612244897), np.float64(0.7755102040816326), np.float64(0.8137755102040817), np.float64(0.8137755102040817), np.float64(0.8714285714285714), np.float64(0.8622448979591837), np.float64(0.9005102040816326), np.float64(0.9183673469387755), np.float64(0.9183673469387755), np.float64(0.9183673469387755), np.float64(0.9566326530612245), np.float64(0.9566326530612245), np.float64(0.9566326530612245), np.float64(0.9948979591836735), np.float64(0.9948979591836735), np.float64(0.9964285714285714), np.float64(0.9964285714285714), np.float64(0.9955357142857143)]
 #	compute_max_eff_freq_range(0.7, 2.5, 0.1, 0.1, 1, 10, wg_factors=wg_factors, set_same_pad = False)
@@ -632,12 +676,12 @@ if __name__ == "__main__":
 #	wg_factors = [0.7857142857142857]
 #	compute_max_eff_freq_range(0.7, 0.7, 0.5, 0.5, 1, 1, wg_factors=wg_factors)
 
-#	compute_max_eff_freq_range(1.5, 1.5, 1, 0.85, 1, 8, param_wg_factor=True)
+	compute_max_eff_freq_range(0.7, 1, 1, params[0], 0.5, 1.5, 8, f_steps=2)
 
 #	compute_max_eff_freq_range(1.8, 1.8, 1, 0, 9, 10, wg_factors=[0.9566326530612245], set_same_pad = False,
 #								coupling=False, same_inc_angle=False)
 
-	print(main(1.8, 9))
+#	print(main(1.8, 9))
 
 # main(1, 0.813775)
 
