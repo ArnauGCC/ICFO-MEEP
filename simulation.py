@@ -23,8 +23,7 @@ def do_check_fr(sim, sx, fr_pad, sy, refl_fr_v_size, wg_fr_y, wg_fr_size):
 
 
 """
-Function to compute n_eff (x) of the waveguide fundamental mode, assuming the 
-waveguide is symmetric (only a core with n > 1 and surrounded by air). d: wg_width
+Function to compute n_eff of the waveguide fundamental mode
 """
 def f(x, n, d):
     return (
@@ -36,7 +35,7 @@ def f(x, n, d):
 
 
 """
-Plots the graphics of the fluxes, used with gaussian source
+Plots the graphics of the fluxes
 """
 def do_plots_(df, freqs, coupled_flux, refl_flux, src_flux, forward):
 	if compute_power:
@@ -146,28 +145,26 @@ def make_stop_when_converged(center, size,	# Energy object
 """EXECUTION"""
 run_meep = True
 gaussian_src = False
-compute_power = False
+compute_power = True
 do_plots = False
-compute_modes_coeff = True
-set_manual_inc_angle = False
-set_same_pad = False
-compute_src_time = True
-compute_src_power = True
+compute_modes_coeff = False
+set_manual_inc_angle = True
+set_same_pad = True
+compute_src_time = False
+compute_src_power = False
 
 
 """ PARAMETERS """
-
 alpha_deg = 45                          # triangle angle (base - side) degrees
 res_factor = 16							# Number of pixels for wavelength in the highest refraction index 
 n = 1.50                                # index waveguide
-pad = 0.17030864				# pad between prism and waveguidem is set if not set_same_pad
+pad = 3.00                              # pad between prism and waveguidem is set if not set_same_pad
 prism_length = 15						# length of prism
 dpml = prism_length/30					# thickness of PML, prism_length/30 should work for any frequency
 offsx = -1.2*prism_length/2             # offset of prism from the center of the cell (== 0 --> left vertex of the prism in the center of the cell)
 offsy = -prism_length/3                 # offset y-axis
-offs_deg = +2.50                        # offset in degrees from critical angle
+offs_deg = +0.00                        # offset in degrees from critical angle
 df_factor = 0.3							# fwidth of source
-wg_factor = 0.9566326530612245							# sets the wg_width = wg_factor/(2*fcen*n)
 theta_inc_deg = 45						# if set_manual_inc_angle theta_inc is set to theta_inc_deg
 src_time = 80							# if not gaussian_src and not compute_src_time, continuous source stops after src_time time units
 src_flux= [-1]							# if not compute_src_power and compute power, then must specify src_flux
@@ -263,7 +260,7 @@ def compute_initial_parameters(alpha, wg_width, fcen, df, n_p):
 		src=mp.GaussianSource(fcen, fwidth=df) if gaussian_src else mp.ContinuousSource(fcen),
 		center=src_center,
 		size=src_size,
-		beam_x0=sx*k/4,					# relatiu al centre de la font
+		beam_x0=src_center + sx*k/4,					# relatiu al centre de la font
 		beam_kdir=k,
 		beam_w0=beam_w0,										# beam waist
 		beam_E0=mp.Vector3(0, 0, 1),
@@ -272,15 +269,12 @@ def compute_initial_parameters(alpha, wg_width, fcen, df, n_p):
 	return k, sx, sy, prism, wg_y, wg, src_size, src_center, src
 
 
-def main(fcen, _offs_deg, src_time=src_time, src_flux=src_flux):
-
-	global pad
+def main(fcen, wg_factor, src_time=src_time, src_flux=src_flux):
+	#fcen = 0.4
 	if set_same_pad:	
+		global pad
 		pad = 1/(fcen*6)
 
-	global offs_deg
-	offs_deg = _offs_deg
-	
 	wg_width = wg_factor/(2*fcen*n)
 	n_p = n + 0.30							# index prism
 	df = fcen*df_factor
@@ -309,7 +303,7 @@ def main(fcen, _offs_deg, src_time=src_time, src_flux=src_flux):
 				src=mp.ContinuousSource(fcen, end_time=src_time),
 				center=src_center,
 				size=src_size,
-				beam_x0=sx*k/4,                     # relatiu al centre de la font
+				beam_x0=src_center + sx*k/4,                     # relatiu al centre de la font
 				beam_kdir=k,
 				beam_w0=beam_w0,                                      # beam waist
 				beam_E0=mp.Vector3(0, 0, 1),
@@ -358,7 +352,7 @@ def main(fcen, _offs_deg, src_time=src_time, src_flux=src_flux):
 	"""RUN SIMULATION"""
 	if run_meep:
 		sim.run(mp.at_beginning(mp.output_epsilon),
-				mp.at_every(1, mp.to_appended(f"f{fcen}-ez", mp.output_efield_z)), 
+				mp.at_every(10, mp.to_appended(f"f{fcen}-ez", mp.output_efield_z)), 
 				until=mp.stop_when_energy_decayed(dt=int(5/fcen), decay_by=1e-6 if gaussian_src else 1e-2))
 
 
@@ -399,7 +393,7 @@ def main(fcen, _offs_deg, src_time=src_time, src_flux=src_flux):
 				coeff = res.alpha
 				forward = np.abs(coeff[0, :, 0])**2
 
-				return forward[0]/src_flux[0]
+				return forward[0]
 
 			if compute_power:
 				coupled_flux = mp.get_fluxes(coupled_region)
@@ -430,10 +424,9 @@ def write_output(text):
 
 """
 This function doesn't have to be called
-Computes the maximum efficiency of a given frequency between two values of a parameter
-with known source time and flux 
+Computes the maximum efficiency of a given frequency between two wg_factors with known source time and flux 
 """
-def find_max_efficiency_(min_s, max_s, n_steps, freq, stage, src_time, src_flux, param_wg_factor):
+def find_max_efficiency_(min_s, max_s, n_steps, freq, stage, src_time, src_flux):
 	write_output("")
 	write_output("STAGE:  " + str(stage))
 
@@ -443,14 +436,11 @@ def find_max_efficiency_(min_s, max_s, n_steps, freq, stage, src_time, src_flux,
 	write_output(steps)
 
 	for s in steps:
-		print("EXECUTING MEEP WITH PARAM = ", s)
+		print("EXECUTING MEEP WITH WG_FACTOR = ", s)
 		eff.append(main(freq, s, src_time, src_flux))
 
 	write_output("EFF:")
 	write_output(eff)
-
-	if n_steps == 1:
-		return eff[0], steps[0]
 
 	max_v= max(eff)
 	max_i = eff.index(max_v)
@@ -460,39 +450,38 @@ def find_max_efficiency_(min_s, max_s, n_steps, freq, stage, src_time, src_flux,
 
 	# The second max is not a neighbour
 	if abs(max_i - second_i) > 1:
-		return find_max_efficiency_(min_s, max_s, 2*n_steps, freq, stage+1, src_time, src_flux, param_wg_factor)
+		return find_max_efficiency(min_s, max_s, 2*n_steps, freq, stage+1, src_time, src_flux)
 
 	# Differnce is lower than 1%
-	if abs(max_v - second_v) < 0.01 and (stage > 0 or not param_wg_factor):
+	if abs(max_v - second_v) < 0.01:
 		return max_v, steps[max_i]
 
 	else:
 		step_size = (max_s - min_s) / n_steps
 
 		if max_i == n_steps - 1:
-			return find_max_efficiency_(steps[max_i-1], steps[max_i] + step_size, n_steps, freq, stage+1, src_time, src_flux, param_wg_factor)
+			return find_max_efficiency(steps[max_i-1], steps[max_i] + step_size, n_steps, freq, stage+1, src_time, src_flux)
 
 		elif max_i == 0:
-			return find_max_efficiency_(steps[0] - step_size, steps[1], n_steps, freq, stage+1, src_time, src_flux, param_wg_factor)
+			return find_max_efficiency(steps[0] - step_size, steps[1], n_steps, freq, stage+1, src_time, src_flux)
 			
 		elif max_i - second_i > 0:
-			return find_max_efficiency_(steps[second_i], steps[max_i] + step_size,
+			return find_max_efficiency(steps[second_i], steps[max_i] + step_size,
 								n_steps if abs(max_v - second_v) > 0.015 or int(n_steps/2) <= 2 
 								else int(n_steps/2), 
-								freq, stage+1, src_time, src_flux, param_wg_factor)
+								freq, stage+1, src_time, src_flux)
 		else:
-			return find_max_efficiency_(steps[max_i] - step_size, steps[second_i], 
+			return find_max_efficiency(steps[max_i] - step_size, steps[second_i], 
 										n_steps if abs(max_v - second_v) > 0.015 or int(n_steps/2) <= 2 
 										else int(n_steps/2), 
-										freq, stage+1, src_time, src_flux, param_wg_factor)
-
+										freq, stage+1, src_time, src_flux)
 	
 """
 Computes the maximum efficiency of a given frequency between two wg_factors
 Partial results are printed in the created file output.txt
 Returns the maximum efficieny with the corresponding wg_factor  
 """
-def find_max_efficiency(param_min, param_max, n_steps, freq, param_wg_factor, set_same_pad_=True, coupling=True, same_inc_angle=True):
+def find_max_efficiency(wg_min, wg_max, n_steps, freq):
 	global compute_src_time
 	global compute_src_power
 	global run_meep
@@ -505,19 +494,19 @@ def find_max_efficiency(param_min, param_max, n_steps, freq, param_wg_factor, se
 
 	run_meep = True
 	gaussian_src = False
-	compute_power = coupling
+	compute_power = True
 	do_plots = False
-	compute_modes_coeff = not coupling
-	set_manual_inc_angle = same_inc_angle
-	set_same_pad = set_same_pad_
+	compute_modes_coeff = False
+	set_manual_inc_angle = True
+	set_same_pad = True
 	compute_src_time = False
 	compute_src_power = False
 	alpha = math.radians(alpha_deg)
 	
 	try:
-		"""Get Source time"""
+		"""Get Source time (worst case --> max wg width)"""
 		resolution = int((n+0.3)*res_factor*freq)
-		k, sx, sy, prism, wg_y, wg, src_size, src_center, src = compute_initial_parameters(alpha, wg_factor/(2*freq*n), freq, 0, n+0.3)
+		k, sx, sy, prism, wg_y, wg, src_size, src_center, src = compute_initial_parameters(alpha, wg_max/(2*freq*n), freq, 0, n+0.3)
 		sim = mp.Simulation(cell_size=mp.Vector3(sx, sy),
 									geometry=[prism, wg],
 									sources=src,
@@ -532,9 +521,9 @@ def find_max_efficiency(param_min, param_max, n_steps, freq, param_wg_factor, se
 						src=mp.ContinuousSource(freq, end_time=src_time),
 						center=src_center,
 						size=src_size,
-						beam_x0=sx*k/4,                     # relatiu al centre de la font
+						beam_x0=src_center + sx*k/4,                     # relatiu al centre de la font
 						beam_kdir=k,
-						beam_w0=beam_w0,                                      # beam waist
+						beam_w0=40,                                      # beam waist
 						beam_E0=mp.Vector3(0, 0, 1),
 						)]
 
@@ -553,7 +542,7 @@ def find_max_efficiency(param_min, param_max, n_steps, freq, param_wg_factor, se
 		src_flux = mp.get_fluxes(src_region)
 
 		"""Compute max efficiency"""
-		return find_max_efficiency_(param_min, param_max, n_steps, freq, 0, src_time, src_flux, param_wg_factor)
+		return find_max_efficiency_(wg_min, wg_max, n_steps, freq, 0, src_time, src_flux)
 
 
 
@@ -568,42 +557,26 @@ def find_max_efficiency(param_min, param_max, n_steps, freq, param_wg_factor, se
 
 """
 In a reange of frequencies, for each frequency (resolution or f_steps must be specified):
-	Computes the maximum efficiency of a given frequency between two values of a parameter
-	(the parameter is specified as a parameter of main function)
+	Computes the maximum efficiency of a given frequency between two wg_factors
 	Results are printed in the created file: output.txt (partial results are also printed)
 """
-def compute_max_eff_freq_range(f_min, f_max, f_res, param_min, param_max, param_steps, 
-							   f_steps = None, param_wg_factor = False, set_same_pad = True, 
-							   wg_factors=[], coupling=True, same_inc_angle=True):	
+def compute_max_eff_freq_range(f_min, f_max, f_res, wg_min=0.5, wg_max=1.5, wg_steps=8, f_steps = None):	
 	eff = []
-	parameters = []
-	global wg_factor
+	wg_factors = []
 
-	if f_steps is None:	f_steps = round((f_max - f_min)/f_res) +1 if f_min < f_max else 1
+	if f_steps is None:	f_steps = int((f_max - f_min)/f_res) +1 if f_min < f_max else 1
 	freqs = np.linspace(f_min, f_max, f_steps)
+	
 
-	if len(wg_factors) != 0 and  len(freqs) != len(wg_factors):
-		raise Exception(f"The length of frequencies ({len(freqs)}) is different \
-from the length of wg_factors ({len(wg_factors)}).")
-
-	i = 0
 	for freq in freqs:
 		write_output("FREQUENCY = " + str(freq))
 
-		# To compute correctly the src_time --> wg_factor must be maximum
-		if param_wg_factor:
-			wg_factor = param_max
-
-		elif len(wg_factors) != 0:
-			wg_factor = wg_factors[i]
-			i += 1
-
 		try:
 			
-			e, param = find_max_efficiency(param_min, param_max, param_steps, freq, param_wg_factor, set_same_pad, coupling, same_inc_angle)
+			e, wg_f = find_max_efficiency(wg_min, wg_max, wg_steps, freq)
 
 			eff.append(e)
-			parameters.append(param)
+			wg_factors.append(wg_f)
 
 		except Exception as exc:
 			print("---------------------------EXCEPTION------------------------------")
@@ -618,36 +591,9 @@ from the length of wg_factors ({len(wg_factors)}).")
 	write_output(freqs)
 	write_output("EFF:")
 	write_output(eff)
-	write_output("PARAMETERS:")
-	write_output(parameters)
-
-
+	write_output("WG_FACTORS:")
+	write_output(wg_factors)
+	
 
 if __name__ == "__main__":
-
-#	wg_factors = [np.float64(0.7857142857142857), np.float64(0.7576530612244897), np.float64(0.7755102040816326), np.float64(0.8137755102040817), np.float64(0.8137755102040817), np.float64(0.8714285714285714), np.float64(0.8622448979591837), np.float64(0.9005102040816326), np.float64(0.9183673469387755), np.float64(0.9183673469387755), np.float64(0.9183673469387755), np.float64(0.9566326530612245), np.float64(0.9566326530612245), np.float64(0.9566326530612245), np.float64(0.9948979591836735), np.float64(0.9948979591836735), np.float64(0.9964285714285714), np.float64(0.9964285714285714), np.float64(0.9955357142857143)]
-#	compute_max_eff_freq_range(0.7, 2.5, 0.1, 0.1, 1, 10, wg_factors=wg_factors, set_same_pad = False)
-
-#	Execute only one freq with one pad
-#	wg_factors = [0.7857142857142857]
-#	compute_max_eff_freq_range(0.7, 0.7, 0.5, 0.5, 1, 1, wg_factors=wg_factors)
-
-#	compute_max_eff_freq_range(1.5, 1.5, 1, 0.85, 1, 8, param_wg_factor=True)
-
-#	compute_max_eff_freq_range(1.8, 1.8, 1, 0, 9, 10, wg_factors=[0.9566326530612245], set_same_pad = False,
-#								coupling=False, same_inc_angle=False)
-
-	print(main(1.8, 9))
-
-# main(1, 0.813775)
-
-
-"""
-	if mp.am_master():
-		plt.figure()
-		plt.plot(widths, eff)
-		plt.xlabel(r'offs _deg$')
-		plt.title("Waveguide Efficiency")
-		plt.grid(True, which="both", alpha=0.3)
-		plt.show()
-"""
+	compute_max_eff_freq_range(0.7, 0.7, 1, wg_min=0.69, wg_max=7, wg_steps=2)

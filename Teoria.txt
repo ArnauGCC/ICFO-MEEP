@@ -22,12 +22,18 @@ Commands:
 
     python3 -m folder.nom.py
 
-    export OMP_NUM_THREADS=14
+    export OMP_NUM_THREADS=8
+
+    mpirun -np 8 python3 script.py
 
     du -sh * .[^.]* 2>/dev/null | sort -h | tail -20
         Buscar arxius pesats (grans)
 
-    scp agonzalezc@NOP01.icfo.es:/home/agonzalezc/software/file.h5 /home/arnaugc/ICFO/MEEP/
+    scp agonzalezc@NOP01.icfo.es:/home/agonzalezc/file /home/arnaugc/ICFO/MEEP/server
+        SSH copiar del server al PC
+
+    scp /home/arnaugc/ICFO/MEEP/file agonzalezc@NOP01.icfo.es:/home/agonzalezc/
+        SSH copiar del PC al server
 
     sudo openfortivpn vpn.icfo.net:443 -u agonzalezc -o codiForti --trusted-cert f5fd42a260ad784e313953d3968c72f98372fc230ae6f48ea96e1c4d98c99b6b
 
