@@ -173,6 +173,7 @@ df_factor = 0.3							# fwidth of source
 theta_inc_deg = 45						# if set_manual_inc_angle theta_inc is set to theta_inc_deg
 src_time = 80							# if not gaussian_src and not compute_src_time, continuous source stops after src_time time units
 src_flux= [-1]							# if not compute_src_power and compute power, then must specify src_flux
+n_wlengths_power_measure = 30			# Number of wavelengths spent to measure the efficiency: compute_power or compute_modes_coeff
 beam_w0 = prism_length/2				# Beam waist, prism_length/2 should work for any prism_length
 fr_division_y_factor = 1/24				# !!!IMPORTANT PARAMETER IF COMPUTING POWER!!! sets the division between the flux region of 
 										# the reflected wave and the flux region of the coupled_wave, to visualize the division:
@@ -190,7 +191,6 @@ def compute_src_time_(sim, stop_condition):
 		until=stop_condition)
 
 	src_time = sim.meep_time()
-	sim.reset_meep()
 	return src_time
 
 
@@ -271,13 +271,13 @@ def compute_initial_parameters(alpha, wg_width, fcen, df, n_p):
 		beam_E0=mp.Vector3(0, 0, 1),
 		)]
 
-	return k, sx, sy, prism, wg_y, wg, src_size, src_center, src
+	return sx, sy, prism, wg_y, wg, src_size, src_center, src
 
 
 def main(fcen, src_time=src_time, src_flux=src_flux):
 
-	if set_same_pad:	
-		eff_params["pad"] = 1/(fcen*6)
+	if set_same_pad:		eff_params["pad"] = 1/(fcen*6)
+	if not gaussian_src:	df = 0
 	
 	wg_width = eff_params["wg_factor"]/(2*fcen*n)
 	n_p = n + 0.30							# index prism
@@ -286,38 +286,12 @@ def main(fcen, src_time=src_time, src_flux=src_flux):
 
 	alpha = math.radians(alpha_deg)         # triangle angle
 
-	k, sx, sy, prism, wg_y, wg, src_size, src_center, src = compute_initial_parameters(alpha, wg_width, fcen, df, n_p)
-
-	
-	"""If not gaussian Source, get time until converged state"""
-	if not gaussian_src and run_meep:
-		if compute_src_time:
-			sim = mp.Simulation(cell_size=mp.Vector3(sx, sy),
-							geometry=[prism, wg],
-							sources=src,
-							resolution=resolution,
-							boundary_layers=[mp.PML(dpml)])
-
-			# Region of convergence is the reflected wave (the wg might not have any fiels inside --> no convergence)
-			src_time = compute_src_time_(sim,  make_stop_when_converged(	mp.Vector3(sx/4, (sy/2 - offsy)/2), 
-																		mp.Vector3(sx/2, (sy/2 - offsy)), 
-																		window=int(2*2*resolution/fcen)))
-
-		src = [mp.GaussianBeam2DSource(
-				src=mp.ContinuousSource(fcen, end_time=src_time),
-				center=src_center,
-				size=src_size,
-				beam_x0=sx*k/4,                     # relatiu al centre de la font
-				beam_kdir=k,
-				beam_w0=beam_w0,                                      # beam waist
-				beam_E0=mp.Vector3(0, 0, 1),
-				)]
-
+	sx, sy, prism, wg_y, wg, src_size, src_center, src = compute_initial_parameters(alpha, wg_width, fcen, df, n_p)
 
 	src_fr = mp.FluxRegion(center=src_center + mp.Vector3(x = 0.5), size=src_size*1.8)
 	nfreq = 200 if gaussian_src else 1
-	if not gaussian_src:	df = 0
 
+	
 	"""RESET to get Source Flux"""
 	if run_meep and compute_src_power:
 		sim = mp.Simulation(cell_size=mp.Vector3(sx, sy),
@@ -325,10 +299,20 @@ def main(fcen, src_time=src_time, src_flux=src_flux):
 							resolution=resolution,
 							boundary_layers=[mp.PML(dpml)]
 							)
-			
-		src_region = sim.add_flux(fcen, df, nfreq, src_fr)
+		if gaussian_src:
+			src_region = sim.add_flux(fcen, df, nfreq, src_fr)
+			sim.run(until_after_sources=2)
 
-		sim.run(until_after_sources=2)
+
+		else:
+			# finestra de 5 longituds d'ona
+			stop_cond = make_stop_when_converged(src_center + mp.Vector3(x=sx/30),
+												mp.Vector3(x=sy/4) + 1.8*src_size,
+												window=int(2*5*resolution/fcen))
+			sim.run(until=stop_cond)
+
+			src_region = sim.add_flux(fcen, df, nfreq, src_fr)	
+			sim.run(until=n_wlengths_power_measure/fcen)
 
 		src_flux = mp.get_fluxes(src_region)
 		sim.reset_meep()
@@ -340,6 +324,17 @@ def main(fcen, src_time=src_time, src_flux=src_flux):
 				resolution=resolution,
 				boundary_layers=[mp.PML(dpml)]
 				)
+
+	"""If not gaussian Source, get time until converged state"""
+	if not gaussian_src and run_meep:
+		if compute_src_time:
+			# Region of convergence is the reflected wave (the wg might not have any fiels inside --> no convergence)
+			compute_src_time_(sim,  make_stop_when_converged(mp.Vector3(sx/4, (sy/2 - offsy)/2), 
+																mp.Vector3(sx/2, (sy/2 - offsy)), 
+																window=int(2*2*resolution/fcen)))
+
+		else:
+			sim.run(until=src_time)
 
 
 	coupled_fr, wg_fr, refl_fr = create_flux_regions(sx, sy, wg_y, wg_width, sim)
@@ -355,13 +350,12 @@ def main(fcen, src_time=src_time, src_flux=src_flux):
 
 	"""RUN SIMULATION"""
 	if run_meep:
-		sim.run(mp.at_beginning(mp.output_epsilon),
+		sim.run(#mp.at_beginning(mp.output_epsilon),
 				mp.at_every(1, mp.to_appended(f"f{fcen}-ez", mp.output_efield_z)), 
-				until=mp.stop_when_energy_decayed(dt=int(5/fcen), decay_by=1e-6 if gaussian_src else 1e-2))
-
+				until=mp.stop_when_energy_decayed(dt=int(5/fcen), decay_by=1e-6) if gaussian_src 
+				else n_wlengths_power_measure/fcen)
 
 		if gaussian_src:
-
 			if compute_modes_coeff:
 				freqs = mp.get_flux_freqs(wg_region)
 				res = sim.get_eigenmode_coefficients(wg_region, bands=[1])
@@ -393,6 +387,8 @@ def main(fcen, src_time=src_time, src_flux=src_flux):
 				
 		else: 
 			if compute_modes_coeff:
+				return mp.get_fluxes(wg_region)[0]/src_flux[0]
+
 				res = sim.get_eigenmode_coefficients(wg_region, bands=[1])
 				coeff = res.alpha
 				forward = np.abs(coeff[0, :, 0])**2
@@ -428,7 +424,7 @@ def write_output(text):
 
 """
 This function doesn't have to be called
-Computes the maximum efficiency of a given frequency between two values of a parameter
+Computes the maximum efficiency of a given frequency between two values of a parameter in eff_parameter
 with known source time and flux 
 """
 def find_max_efficiency_(param, min_s, max_s, n_steps, freq, stage, src_time, src_flux):
@@ -457,17 +453,23 @@ def find_max_efficiency_(param, min_s, max_s, n_steps, freq, stage, src_time, sr
 	second_v = max(n for n in eff if n != max_v)
 	second_i = eff.index(second_v)
 
+	step_size = (max_s - min_s) / n_steps
+
 	# The second max is not a neighbour
 	if abs(max_i - second_i) > 1:
 		return find_max_efficiency_(param, min_s, max_s, 2*n_steps, freq, stage+1, src_time, src_flux)
 
+	elif max_i == 0:
+		return find_max_efficiency_(param, min_s - 2*step_size, second_v, n_steps, freq, stage+1, src_time, src_flux)
+
+	elif max_i == n_steps-1:
+		return find_max_efficiency_(param, second_v , max_s + 2*step_size, n_steps, freq, stage+1, src_time, src_flux)
+	
 	# Differnce is lower than 1%
 	if abs(max_v - second_v) < 0.01 and stage > 0:
 		return max_v, steps[max_i]
 
 	else:
-		step_size = (max_s - min_s) / n_steps
-
 		if max_i == n_steps - 1:
 			return find_max_efficiency_(param, steps[max_i-1], steps[max_i] + step_size, n_steps, freq, stage+1, src_time, src_flux)
 
@@ -487,12 +489,12 @@ def find_max_efficiency_(param, min_s, max_s, n_steps, freq, stage, src_time, sr
 
 	
 """
-Computes the maximum efficiency of a given frequency between two wg_factors
+Computes the maximum efficiency of a given frequency between two values of a parameter in eff_parameter
 Partial results are printed in the created file output.txt
-Returns the maximum efficieny with the corresponding wg_factor  
+Returns the maximum efficieny with the corresponding parameter  
 """
 def find_max_efficiency(param, param_min, param_max, n_steps, freq):
-	if param not in eff_params:	Exception("Parameter specified is not a key in eff_params.")
+	if param not in eff_params:	raise Exception(f"The parameter ({param}) must be one of the eff_params keys: {list(eff_params.keys())}.")
 
 	global compute_src_time
 	global compute_src_power
@@ -504,47 +506,50 @@ def find_max_efficiency(param, param_min, param_max, n_steps, freq):
 	run_meep = True
 	gaussian_src = False
 	do_plots = False
-	compute_src_time = False
+	compute_src_time = param == "offs_deg"
 	compute_src_power = False
 	alpha = math.radians(alpha_deg)
 	
 	try:
-		"""Get Source time"""
+		
 		resolution = int((n+0.3)*res_factor*freq)
-		k, sx, sy, prism, wg_y, wg, src_size, src_center, src = compute_initial_parameters(alpha, eff_params["wg_factor"]/(2*freq*n), freq, 0, n+0.3)
-		sim = mp.Simulation(cell_size=mp.Vector3(sx, sy),
-									geometry=[prism, wg],
-									sources=src,
-									resolution=resolution,
-									boundary_layers=[mp.PML(dpml)])
-		
-		src_time = compute_src_time_(sim,  make_stop_when_converged(	mp.Vector3(sx/4, (sy/2 - offsy)/2), 
-																				mp.Vector3(sx/2, (sy/2 - offsy)), 
-																				window=int(2*2*resolution/freq)))
-		
-		src = [mp.GaussianBeam2DSource(
-						src=mp.ContinuousSource(freq, end_time=src_time),
-						center=src_center,
-						size=src_size,
-						beam_x0=sx*k/4,                     # relatiu al centre de la font
-						beam_kdir=k,
-						beam_w0=beam_w0,                                      # beam waist
-						beam_E0=mp.Vector3(0, 0, 1),
-						)]
+		sx, sy, prism, wg_y, wg, src_size, src_center, src = compute_initial_parameters(alpha, eff_params["wg_factor"]/(2*freq*n), freq, 0, n+0.3)			
+		src_time = -1
+
+		"""Get Source time (if compute_src_time is False, means that main() function won't compute it)"""
+		if not compute_src_time:
+			sim = mp.Simulation(cell_size=mp.Vector3(sx, sy),
+										geometry=[prism, wg],
+										sources=src,
+										resolution=resolution,
+										boundary_layers=[mp.PML(dpml)])
+			
+			src_time = compute_src_time_(sim,  make_stop_when_converged(	mp.Vector3(sx/4, (sy/2 - offsy)/2), 
+																					mp.Vector3(sx/2, (sy/2 - offsy)), 
+																					window=int(2*2*resolution/freq)))
+			sim.reset_meep()
+
 
 		"""Compute Source flux (always the same)"""
 		sim = mp.Simulation(cell_size=mp.Vector3(sx, sy),
-									sources=src,
-									resolution=resolution,
-									boundary_layers=[mp.PML(dpml)]
-									)
+							sources=src,
+							resolution=resolution,
+							boundary_layers=[mp.PML(dpml)]
+							)
 		
 		src_fr = mp.FluxRegion(center=src_center + mp.Vector3(x = 0.5), size=src_size*1.8)			
-		src_region = sim.add_flux(freq, 0, 1, src_fr)
 
-		sim.run(until_after_sources=2)
+		stop_cond = make_stop_when_converged(src_center + mp.Vector3(x=sx/30),
+														mp.Vector3(x=sy/4) + 1.8*src_size,
+														window=int(2*5*resolution/freq))
+		sim.run(until=stop_cond)
+
+		src_region = sim.add_flux(freq, 0, 1, src_fr)	
+		sim.run(until=n_wlengths_power_measure/freq)
+
 
 		src_flux = mp.get_fluxes(src_region)
+		sim.reset_meep()
 
 		"""Compute max efficiency"""
 		return find_max_efficiency_(param, param_min, param_max, n_steps, freq, 0, src_time, src_flux)
@@ -577,7 +582,7 @@ def check_exceptions(param, f_steps, wg_factors_len, pads_len, offs_degs_len):
 			if offs_degs_len != 0: raise_exc_list_param_not_empty(param)
 
 		case _:
-			raise Exception("The parameter must be one of the eff_params keys (wg_factor, pad or offs_deg).")
+			raise Exception(f"The parameter ({param}) must be one of the eff_params keys: {list(eff_params.keys())}.")
 
 	
 	if wg_factors_len != 0 and  f_steps != wg_factors_len:
@@ -592,8 +597,7 @@ def check_exceptions(param, f_steps, wg_factors_len, pads_len, offs_degs_len):
 
 """
 In a reange of frequencies, for each frequency (resolution or f_steps must be specified):
-	Computes the maximum efficiency of a given frequency between two values of a parameter
-	(the parameter is specified as a parameter of main function)
+	Computes the maximum efficiency of a given frequency between two values of a parameter in eff_parameter
 	Results are printed in the created file: output.txt (partial results are also printed)
 """
 def compute_max_eff_freq_range(f_min, f_max, f_res, param, param_min, param_max, param_steps,
@@ -659,7 +663,7 @@ def compute_max_eff_freq_range(f_min, f_max, f_res, param, param_min, param_max,
 	write_output(freqs)
 	write_output("EFF:")
 	write_output(eff)
-	write_output(f"PARAMETERS: ({param})")
+	write_output(f"PARAMETERS ({param}):")
 	write_output(parameters)
 	write_output("")
 	write_output("")
@@ -667,31 +671,42 @@ def compute_max_eff_freq_range(f_min, f_max, f_res, param, param_min, param_max,
 
 
 if __name__ == "__main__":
+	f_min = 0.7
+	f_max = 2.5
+	f_res = 0.1
+	f_steps = round((f_max - f_min)/f_res) +1
+
+	freqs = np.linspace(f_min, f_max, f_steps)
+
+	wg_factors = [np.float64(0.7857142857142857), np.float64(0.7576530612244897), np.float64(0.7755102040816326), np.float64(0.8137755102040817), np.float64(0.8137755102040817), np.float64(0.8714285714285714), np.float64(0.8622448979591837), np.float64(0.9005102040816326), np.float64(0.90625), np.float64(0.9183673469387755), np.float64(0.9183673469387755), np.float64(0.9566326530612245), np.float64(0.9566326530612245), np.float64(0.9566326530612245), np.float64(0.9948979591836735), np.float64(0.9948979591836735), np.float64(0.9964285714285714), np.float64(0.9964285714285714), np.float64(0.9955357142857143)]
+	pad_coupled = [np.float64(0.18444444444444447), np.float64(0.19444444444444448), np.float64(0.17272222222222222), np.float64(0.16333333333333336), np.float64(0.14222222222222225), np.float64(0.1366666666666667), np.float64(0.1202716049382716), np.float64(0.11672839506172841), np.float64(0.10487654320987655), np.float64(0.10487654320987655), np.float64(0.10165432098765431), np.float64(0.0956172839506173), np.float64(0.09116049382716052), np.float64(0.08983055555555555), np.float64(0.07911666666666667), np.float64(0.07661728395061729), np.float64(0.07265432098765431), np.float64(0.07265432098765431), np.float64(0.07265432098765431)]
+	pad_wg = [np.float64(0.3625277777777778), np.float64(0.36524999999999996), np.float64(0.33394444444444443), np.float64(0.28494444444444444), np.float64(0.25363888888888886), np.float64(0.2563611111111111), np.float64(0.22777777777777775), np.float64(0.20781481481481484), np.float64(0.19919444444444445), np.float64(0.20191667), np.float64(0.1932963), np.float64(0.17030864), np.float64(0.15881481)]
+	offs_degs = []
+
 	params = list(eff_params.keys())		# params = ["wg_factor", "pad", "offs_deg"]
 
-#	wg_factors = [np.float64(0.7857142857142857), np.float64(0.7576530612244897), np.float64(0.7755102040816326), np.float64(0.8137755102040817), np.float64(0.8137755102040817), np.float64(0.8714285714285714), np.float64(0.8622448979591837), np.float64(0.9005102040816326), np.float64(0.9183673469387755), np.float64(0.9183673469387755), np.float64(0.9183673469387755), np.float64(0.9566326530612245), np.float64(0.9566326530612245), np.float64(0.9566326530612245), np.float64(0.9948979591836735), np.float64(0.9948979591836735), np.float64(0.9964285714285714), np.float64(0.9964285714285714), np.float64(0.9955357142857143)]
-#	compute_max_eff_freq_range(0.7, 2.5, 0.1, 0.1, 1, 10, wg_factors=wg_factors, set_same_pad = False)
 
-#	Execute only one freq with one pad
-#	wg_factors = [0.7857142857142857]
-#	compute_max_eff_freq_range(0.7, 0.7, 0.5, 0.5, 1, 1, wg_factors=wg_factors)
+	f1 = 0.7
+	f2 = 3
 
-	compute_max_eff_freq_range(0.7, 1, 1, params[0], 0.5, 1.5, 8, f_steps=2)
+	indx1 = np.where(np.isclose(freqs, f1))[0][0]
+	indx2 = np.where(np.isclose(freqs, f2))[0][0]
 
-#	compute_max_eff_freq_range(1.8, 1.8, 1, 0, 9, 10, wg_factors=[0.9566326530612245], set_same_pad = False,
-#								coupling=False, same_inc_angle=False)
+	print(indx2, indx1)
 
-#	print(main(1.8, 9))
-
-# main(1, 0.813775)
-
+	compute_max_eff_freq_range(	f1, f2, 0.1, params[0], 0.5, 1.5, 10,
+#								f_steps=indx2 - indx1 + 1,
+#								wg_factors=wg_factors[indx1:indx2+1],
+#								pads=pad_wg[indx1:indx2+1],
+#								offs_degs=pad_wg[indx1:indx2+1],
+								coupling=True, same_inc_angle=True
+								)
 
 """
-	if mp.am_master():
-		plt.figure()
-		plt.plot(widths, eff)
-		plt.xlabel(r'offs _deg$')
-		plt.title("Waveguide Efficiency")
-		plt.grid(True, which="both", alpha=0.3)
-		plt.show()
+	freq = 1.8
+	indx = np.where(np.isclose(freqs, freq)[0][0]
+	eff_params["wg_factor"] = wg_factors[indx]
+	eff_params["pads"] = pad_wg[indx]
+	
+	print(main(freq))
 """
