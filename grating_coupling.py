@@ -7,32 +7,33 @@ from packages.utils import *
 
 class GratingCoupler:
 	
-	"""EXECUTION"""
-	run_meep = True
-	do_plots = False
-	end_src = False
-	compute_eff = True
-	compute_src_power = True
-	compute_src_time = True
-	show_region_converged_state = False
+	""" EXECUTION (Parameters for main() function) """
+	run_meep = True							# Runs the simulation, False to check geometry
+	do_plots = False						# True:	Plots the geometry (and fields if run_meep)
+	end_src = False							# Computes efficencies turning on and off the source
+	compute_eff = True						# Computes the efficiency of the coupled waveguide
+	compute_src_time = True					# True: src_time is computed in main(), else: src_time is set manual
+	compute_src_power = True				# True: main() computes the source power, else: src_power is set manual
+	show_region_converged_state = False		# Shows the region used to determinate a converged state (if do_plots)
+
 
 	""" PARAMETERS """
 	freq = 1
-	eff_params = {
-		"theta_deg":            16, 
-		"grat_period_factor":   1, 
-		"wg_width_factor":      1,
-		"grat_height_factor":   1/2,
-		"grat_duty_cycle":		0.5,
+	eff_params = {							# Variables that can be used find max efficiency 
+		"theta_deg":            16, 		# Degrees of inclination from normal incidence to the waveguide
+		"grat_period_factor":   1, 			# The grating period is gp = eff_params['grat_period_factor'] / freq
+		"wg_width_factor":      1,			# The waveguide widyh is wg_width = eff_params["wg_width_factor"] / (2*freq)
+		"grat_height_factor":   1/2,		# The grating height is gh = eff_params['grat_height_factor'] * wg_width
+		"grat_duty_cycle":		0.5,		# Sets the grating duty cycle
 	}
-	n_wg = 1.5
-	n_wlengths_power_measure = 30
-	n_cells = 40
+	n_wg = 1.5								# waveguide refraction index
+	n_wlengths_power_measure = 30			# Number of wavelengths spent to measure the efficiency: self.compute_power or self.compute_modes_coeff
+	n_cells = 40							# Number of cells of the grating
 
-	res_factor = 20
-	src_time = -1
-	src_power = -1
-
+	res_factor = 20							# Number of pixels for wavelength in the highest refraction index 
+	src_time = -1							# if not compute_src_time, is assumed a converged state after src_time time units to compute efficiency
+	src_power = -1							# if not compute_src_power, then must specify src_flux to compute efficiency
+	h5_name = ""
 
 	def compute_initial_parameters(self, freq, gp, wg_width, gh, gdc):
 		pad_src_wg = 5/freq
@@ -76,7 +77,7 @@ class GratingCoupler:
 
 
 		wg_width = 	self.eff_params["wg_width_factor"] / (2*freq)
-		gp = 		self.eff_params['grat_period_factor'] * freq
+		gp = 		self.eff_params['grat_period_factor'] / freq
 		gdc = 		self.eff_params['grat_duty_cycle']
 		gh = 		self.eff_params['grat_height_factor'] * wg_width
 
@@ -124,9 +125,9 @@ class GratingCoupler:
 				wg_region = sim.add_flux(freq, df, nfreq, wg_fr)
 
 			sim.run(
-#					mp.at_beginning(mp.output_epsilon),
-#					mp.at_every(1, mp.to_appended(f"ez", mp.output_efield_z)),
-					until=stop_cond)
+#					mp.at_beginning(mp.with_prefix(f"{self.h5_name}-", mp.output_epsilon)),
+#					mp.at_every(1, mp.to_appended(f"{self.h5_name}-ez", mp.output_efield_z)),
+					until=stop_cond if self.compute_src_time else src_time)
 
 
 			if self.end_src:
@@ -138,9 +139,10 @@ class GratingCoupler:
 				if not self.end_src:
 					wg_region = sim.add_flux(freq, df, nfreq, wg_fr)
 
+				if self.h5_name != "":	self.h5_name = self.h5_name + '-'
 				sim.run(
-	                    mp.at_beginning(mp.output_epsilon),
-	                    mp.at_every(1, mp.to_appended(f"ez", mp.output_efield_z)),
+	                    mp.at_beginning(mp.with_prefix(f"{self.h5_name}", mp.output_epsilon)),
+	                    mp.at_every(1, mp.to_appended(f"{self.h5_name}ez", mp.output_efield_z)),
 						until= mp.stop_when_energy_decayed(dt=int(5/freq), decay_by=1e-4) if self.end_src 
 						else self.n_wlengths_power_measure/freq)
 
@@ -169,8 +171,6 @@ class GratingCoupler:
 					src_power = mp.get_fluxes(src_region)[0]
 
 				eff = -mp.get_fluxes(wg_region)[0]/src_power
-				write_output(str(self.eff_params['theta_deg']))
-				write_output(str(eff))
 				return eff
 
 				
@@ -193,13 +193,91 @@ class GratingCoupler:
 		self.eff_params[param] = value
 
 
-	def find_max_efficiency(self, param, min_s, max_s, n_steps, freq, stage, src_time, src_flux):
+	def get_variables(self):
+		return list(self.eff_params.keys())
 
 
-		return find_max_efficiency_(self, param, min_s, max_s, n_steps, freq, stage, src_time, src_flux)
+	def find_max_efficiency(self, param, min_s, max_s, n_steps, freq):
+		"""
+		Computes the maximum efficiency of a given frequency (global parameter) between two values of a 
+		variable in self.eff_parameter (to get the list of variables use: get_variables())
+		Partial results are printed in the created file output.txt
+		Returns the maximum efficieny with the corresponding value of the parameter  
+		"""
+
+		if param not in self.eff_params:	raise Exception(f"The variable ({param}) must be one of the "\
+			"self.eff_params keys: {self.get_variables()}. To get the list use: get_variables()")
+
+		self.run_meep = True
+		self.do_plots = False
+		self.end_src = False
+		self.compute_eff = True
+		self.compute_src_power = param == "theta_deg"
+		self.compute_src_time = True
+		self.show_region_converged_state = False
+
+		src_power = None
+		"""Compute Source Power"""
+		if not self.compute_src_power:
+			wg_width = 	self.eff_params["wg_width_factor"] / (2*freq)
+			gp = 		self.eff_params['grat_period_factor'] / freq
+			gdc = 		self.eff_params['grat_duty_cycle']
+			gh = 		self.eff_params['grat_height_factor'] * wg_width
+			resolution = int(self.res_factor * self.n_wg * freq)
+	
+			dpml, sx, sy, wg_y, geometry, src_size, src_center, k, beam_w0, src = self.compute_initial_parameters(freq, gp, wg_width, gh, gdc)
+
+			sim_src = mp.Simulation(cell_size=mp.Vector3(sx, sy),
+									sources=src,
+									resolution=resolution,
+									boundary_layers=[mp.PML(dpml)]
+									)
+
+			sim_src.run(until=10)
+			src_fr = mp.FluxRegion(center=src_center - mp.Vector3(y=1), size=src_size*1.2)
+
+			src_region = sim_src.add_flux(freq, 0, 1, src_fr)
+			sim_src.run(until= self.n_wlengths_power_measure/freq)
+			src_power = mp.get_fluxes(src_region)[0]
+
+		time = None
+		if param not in ["theta_deg", "grat_period_factor", "grat_height_factor", "grat_duty_cycle"]:
+			self.compute_src_time = False
+
+			"""Time for converged state is maximum for larger wg_widths"""
+			if param == "wg_width_factor":
+				self.set_global_param(param, max_s)
+
+			sim = mp.Simulation(cell_size=mp.Vector3(sx, sy),
+										geometry=geometry,
+										sources=src,
+										resolution=resolution,
+										boundary_layers=[mp.PML(dpml)]
+										)
+
+			conv_region_size = mp.Vector3(sx/4, wg_width)
+			conv_region_center = mp.Vector3((sx - conv_region_size.x)/2, wg_y)
+
+			stop_cond = make_stop_when_converged(center=conv_region_center, size=conv_region_size,
+													window=int(2*10*resolution/(freq*self.n_wg)), tolerance=1e-5)
+
+			sim.run(until=stop_cond)
+			time = sim.meep_time()
+
+		return find_max_efficiency_(self, param, min_s, max_s, n_steps, freq, 0, time, src_power)
 
 
 if __name__ == "__main__":
+
+	"""
+	grat_period_factor: 0.5, 2
+	wg_width_factor:	0.5, 1.5
+	grat_height_factor:	0.2, 0.8
+	grat_duty_cycle:	0.2, 0.8
+	"""
+
+
+
 	"""
 	ef, fact = find_max_efficiency_("theta_deg", 16, 16.5, 2, freq, 0, -1, -1)
 

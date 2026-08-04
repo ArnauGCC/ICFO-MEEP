@@ -108,39 +108,40 @@ class PrismCoupler:
 		plt.show()
 
 
-	"""EXECUTION"""
-	run_meep = True
-	gaussian_src = False
-	compute_power = True
-	do_plots = True
-	show_fr_division = True
-	compute_modes_coeff = True
-	set_manual_inc_angle = True
-	set_same_pad = False
-	compute_src_time = True
-	compute_src_power = True
+	""" EXECUTION (Parameters for main() function) """
+	run_meep = True							# Runs the simulation, False to check geometry
+	gaussian_src = False					# True: Gaussian Source, False: Continuous Source
+	compute_power = True					# Computes the power of the coupled wave important to change -> fr_division_y_factor
+	get_refl_power = False					# If compute_power and get_refl_power: retrurn refl_power eff, else: return coupled_power eff
+	do_plots = True							# If gaussian_src and run_meep: plots efficiency graphics, else: plots geometry
+	show_fr_division = True					# If do_plots shows the division between coupled waveguide and radiated energy of wg
+	compute_modes_coeff = True				# If True computes the efficiency only in the waveguide
+	set_manual_inc_angle = True				# If True the incident angle is set to theta_inc_deg, else is computed an aproximation of best efficiency angle
+	set_same_pad = False					# If True eff_params['pad'] = 1/(freq*6) 
+	compute_src_time = True					# If True src_time is computed in main(), else: src_time is set manual
+	compute_src_power = True				# If True main() computes the source power, else: src_flux is set manual
 
 
 	""" PARAMETERS """
-	eff_params = {							# Parameters that can be used find max efficiency 
-		"wg_factor":	0.9,				# sets the wg_width = wg_factor/(2*fcen*n)
-		"pad": 			0.15,				# pad between prism and waveguidem is set if not self.set_same_pad
-		"offs_deg": 	+2.50,				# offset in degrees from critical angle
+	eff_params = {							# Variables that can be used find max efficiency 
+		"wg_factor":	0.9,				# Sets the wg_width = wg_factor/(2*fcen*n)
+		"pad": 			0.15,				# Pad between prism and waveguidem is set if not self.set_same_pad
+		"offs_deg": 	+2.50,				# Offset in degrees from critical angle
 	}
 
-	alpha_deg = 45                          # triangle angle (base - side) degrees
+	alpha_deg = 45                          # Triangle angle (base - side) degrees
 	res_factor = 16							# Number of pixels for wavelength in the highest refraction index 
-	n = 1.50                                # index waveguide
-	prism_length = 15						# length of prism
-	dpml = prism_length/30					# thickness of PML, self.prism_length/30 should work for any frequency
-	offsx = -1.2*prism_length/2             # offset of prism from the center of the cell (== 0 --> left vertex of the prism in the center of the cell)
-	offsy = -prism_length/3                 # offset y-axis
-	df_factor = 0.3							# fwidth of source
-	theta_inc_deg = 45						# if self.set_manual_inc_angle theta_inc is set to self.theta_inc_deg
-	src_time = 80							# if not self.gaussian_src and not self.compute_src_time, continuous source stops after src_time time units
-	src_flux= [-1]							# if not self.compute_src_power and compute power, then must specify src_flux
+	n = 1.50                                # Waveguide refraction index
+	prism_length = 15						# Length of prism
+	dpml = prism_length/30					# Thickness of PML, self.prism_length/30 should work for any frequency
+	offsx = -1.2*prism_length/2             # Offset of prism from the center of the cell (== 0 --> left vertex of the prism in the center of the cell)
+	offsy = -prism_length/3                 # Offset y-axis
+	df_factor = 0.3							# Fwidth [of source] = df_factor * fcen
+	theta_inc_deg = 45						# If self.set_manual_inc_angle theta_inc is set to self.theta_inc_deg
+	src_time = 80							# If not gaussian_src (continuous source) and not compute_src_time, is assumed a converged state after src_time time units
+	src_flux= [-1]							# If not compute_src_power and compute power, then must specify src_flux
 	n_wlengths_power_measure = 30			# Number of wavelengths spent to measure the efficiency: self.compute_power or self.compute_modes_coeff
-	beam_w0 = prism_length/2				# Beam waist, self.prism_length/2 should work for any self.prism_length
+	beam_w0 = prism_length/2				# Beam waist, prism_length/2 should work for any prism_length
 	fr_division_y_factor = 1/20				# !!!IMPORTANT PARAMETER IF COMPUTING POWER!!! sets the division between the flux region of 
 											# the reflected wave and the flux region of the coupled_wave, to visualize the division:
 											# self.run_meep = False and self.do_plots = True the division must match with the simulation
@@ -242,6 +243,10 @@ class PrismCoupler:
 
 
 	def main(self, fcen, src_time=src_time, src_flux=src_flux):
+		if not self.gaussian_src and self.compute_power and self.compute_modes_coeff: 
+			Warning("If not gaussian_src (continuous source) and compute_power = compute_modes_coeff = True "\
+		   				"returns always the power only in the waveguide. The global variable: compute_power "\
+		   				"or compute_modes_coeff must be False.")
 
 		if self.set_same_pad:		self.eff_params["pad"] = 1/(fcen*6)
 		if not self.gaussian_src:	df = 0
@@ -299,8 +304,7 @@ class PrismCoupler:
 				stop_cond = make_stop_when_converged(mp.Vector3(sx/4, (sy/2 - self.offsy)/2), mp.Vector3(sx/2, (sy/2 - self.offsy)), window=int(2*2*resolution/fcen))
 				self.compute_src_time_(sim, stop_cond)
 
-			else:
-				sim.run(until=src_time)
+			sim.run(until=src_time)
 
 
 		coupled_fr, wg_fr, refl_fr = self.create_flux_regions(sx, sy, wg_y, wg_width, sim)
@@ -372,10 +376,13 @@ class PrismCoupler:
 					return forward[0]/src_flux[0]
 
 				if self.compute_power:
-					coupled_flux = mp.get_fluxes(coupled_region)
-					refl_flux = mp.get_fluxes(refl_region)
-
-					return coupled_flux[0]/src_flux[0]
+					if self.get_refl_power:
+						refl_flux = mp.get_fluxes(refl_region)
+						return refl_flux[0]/src_flux[0]
+					
+					else:
+						coupled_flux = mp.get_fluxes(coupled_region)
+						return coupled_flux[0]/src_flux[0]
 				
 
 		else:
@@ -397,13 +404,7 @@ class PrismCoupler:
 		"""
 		if param not in self.eff_params:	raise Exception(f"The parameter ({param}) must be one of the self.eff_params keys: {list(self.eff_params.keys())}.")
 
-		#global compute_src_time
-		#global compute_src_power
-		#global run_meep
-		#global gaussian_src
-		#global do_plots
 
-		
 		self.run_meep = True
 		self.gaussian_src = False
 		self.do_plots = False
@@ -512,10 +513,6 @@ class PrismCoupler:
 							"param = 'offs_deg', as the self.fr_division_y_factor changes for every angle. " \
 							"This is:\n same_inc_angle = False --> coupling = False.") 
 		
-		#global self.compute_power
-		#global self.compute_modes_coeff
-		#global self.set_manual_inc_angle
-		#global self.set_same_pad
 
 		self.compute_power = coupling
 		self.compute_modes_coeff = not coupling

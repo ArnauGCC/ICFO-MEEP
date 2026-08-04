@@ -12,7 +12,7 @@ There must be some fields to reach a converged state
 def make_stop_when_converged(center, size,	# Energy object
 							 window=10,
 							 tolerance=1e-6,
-							 min_field=1e-6, print_err=False, err_rate=100):
+							 min_field=1e-6, print_err=False, err_rate=100, max_time = 200):
 
 	energy_history = []
 	i = 0
@@ -35,6 +35,13 @@ def make_stop_when_converged(center, size,	# Energy object
 
 		error = np.mean(np.abs(avg2 - avg1) / (np.abs(avg1) + 1e-20))
 		if print_err and i%err_rate==0:	print("ERROR: ", error)
+		if sim.meep_time() >= 400:
+			print("--------------------------------------------------------")
+			print("----------------MAXIMUM TIME REACHED--------------------")
+			print("--------------------------------------------------------")
+
+			write_output("----------------MAXIMUM TIME REACHED--------------------")
+			return True
 			
 		return error < tolerance
 
@@ -68,8 +75,11 @@ def find_max_efficiency_(coupler, param, min_s, max_s, n_steps, freq, stage, src
 	for s in steps:
 		print("EXECUTING MEEP WITH PARAM = ", s)
 		coupler.set_global_param(param, s)
-		#eff_params[param] = s
-		eff.append(coupler.main(freq, src_time, src_flux))
+		e = coupler.main(freq, src_time, src_flux)
+		eff.append(e)
+
+		write_output(param + ": " + str(s))
+		write_output("efficiency: " + str(e))
 
 	write_output("EFF:")
 	write_output(eff)
