@@ -2,17 +2,17 @@ import meep as mp
 import numpy as np
 
 
-"""
-Computes if the region given has reached a stable (converged) state, 
-this is, there are no significant fluctuations of the energy inside the region 
-in some time (window)
-
-There must be some fields to reach a converged state
-"""
 def make_stop_when_converged(center, size,	# Energy object
 							 window=10,
 							 tolerance=1e-6,
-							 min_field=1e-6, print_err=False, err_rate=100, max_time = 400):
+							 min_field=10, print_err=False, err_rate=100, max_time = 400):
+	"""
+	Computes if the region given has reached a stable (converged) state, 
+	this is, there are no significant fluctuations of the energy inside the region 
+	in some time (window)
+
+	There must be some fields to reach a converged state
+	"""
 
 	energy_history = []
 	i = 0
@@ -30,6 +30,7 @@ def make_stop_when_converged(center, size,	# Energy object
 		avg2 = np.mean(energy_history[-window:], axis=0)
 
 		# Do not check convergence before energy has arrived
+		#print(np.mean(np.abs(avg2)))
 		if np.max(np.abs(avg2)) < min_field:
 			return False
 
@@ -48,22 +49,32 @@ def make_stop_when_converged(center, size,	# Energy object
 	return stop_when_field_const
 
 
-"""
-Writes output to the file output.txt
-If file not exists is created in working directory
-"""
+def compute_freqs(f_min, f_max, f_res):
+	"""
+	Computes the frequencies in a given range with a given resolution
+	"""
+	n_freqs = round((f_max - f_min)/f_res) + 1
+	freqs = np.linspace(f_min, f_max, n_freqs)
+	return freqs
+
+
 def write_output(*args):
+	"""
+	Writes output to the file output.txt
+	If file not exists is created in working directory
+	"""
 	if mp.am_master():
 		with open("output.txt", "a") as file:
 			file.write(" ".join(map(str, args)) + "\n")
 
 
-"""
-This function doesn't have to be called
-Computes the maximum efficiency of a given frequency between two values of a parameter in eff_parameter
-with known source time and flux 
-"""
 def find_max_efficiency_(coupler, param, min_s, max_s, n_steps, freq, stage, src_time, src_flux, do_ints=False):
+	"""
+	This function doesn't have to be called
+	Computes the maximum efficiency of a given frequency between two values of a parameter in eff_parameter
+	with known source time and flux 
+	"""
+
 	write_output("")
 	write_output("STAGE:  " + str(stage))
 

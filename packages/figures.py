@@ -1,9 +1,9 @@
 import meep as mp
 import math
-from dataclasses import dataclass
+import dataclasses
 
 
-@dataclass
+@dataclasses.dataclass
 class Layer:
     width: float
     index:  float

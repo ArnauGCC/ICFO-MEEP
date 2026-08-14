@@ -107,3 +107,32 @@ Introduccio:
 
 
 
+ABANS CANVIAR EL NOM DEL OUTPUT!!!!!!!!!!!
+kill -CONT 10690 10691 10692 10693 10694 10695 10696 10697 10698 10699
+ps -o pid,ppid,pgid,stat,cmd -p 10690,10691,10692,10693,10694,10695,10696,10697,10698,10699
+
+10690  4098 10690 T    mpirun -np 8 python3 sims2.py
+10691 10690 10691 Ts   /home/agonzalezc/software/miniconda3/envs/pmp/bin/hydra_pmi_proxy --control-port NOP01.icfo.es:45749 --rmk user --laun
+10692 10691 10692 Tsl  python3 sims2.py
+10693 10691 10693 Tsl  python3 sims2.py
+10694 10691 10694 Tsl  python3 sims2.py
+10695 10691 10695 Tsl  python3 sims2.py
+10696 10691 10696 Tsl  python3 sims2.py
+10697 10691 10697 Tsl  python3 sims2.py
+10698 10691 10698 Tsl  python3 sims2.py
+10699 10691 10699 Tsl  python3 sims2.py
+
+
+kill -STOP 10690 10691 10692 10693 10694 10695 10696 10697 10698 10699
+
+ps -eo pid,ppid,pgid,sid,stat,cmd | grep -E 'mpirun|hydra_pmi_proxy|python' | grep -v grep
+10690  4098 10690  4098 T    mpirun -np 8 python3 sims2.py
+10691 10690 10691 10691 Ts   /home/agonzalezc/software/miniconda3/envs/pmp/bin/hydra_pmi_proxy --control-port NOP01.icfo.es:45749 --rmk user --launcher ssh --demux poll --pgid 0 --retries 10 --usize -2 --pmi-port 0 --gpus-per-proc -2 --gpu-subdevs-per-proc -2 --proxy-id 0
+10692 10691 10692 10692 Tsl  python3 sims2.py
+10693 10691 10693 10693 Tsl  python3 sims2.py
+10694 10691 10694 10694 Tsl  python3 sims2.py
+10695 10691 10695 10695 Tsl  python3 sims2.py
+10696 10691 10696 10696 Tsl  python3 sims2.py
+10697 10691 10697 10697 Tsl  python3 sims2.py
+10698 10691 10698 10698 Tsl  python3 sims2.py
+10699 10691 10699 10699 Tsl  python3 sims2.py
