@@ -29,13 +29,6 @@ def make_stop_when_converged(center, size,	# Energy object
 		avg1 = np.mean(energy_history[-2*window:-window], axis=0)
 		avg2 = np.mean(energy_history[-window:], axis=0)
 
-		# Do not check convergence before energy has arrived
-		#print(np.mean(np.abs(avg2)))
-		if np.max(np.abs(avg2)) < min_field:
-			return False
-
-		error = np.mean(np.abs(avg2 - avg1) / (np.abs(avg1) + 1e-20))
-		if print_err and i%err_rate==0:	print("ERROR: ", error)
 		if sim.meep_time() >= max_time:
 			print("--------------------------------------------------------")
 			print("----------------MAXIMUM TIME REACHED--------------------")
@@ -43,22 +36,36 @@ def make_stop_when_converged(center, size,	# Energy object
 
 			write_output("----------------MAXIMUM TIME REACHED--------------------")
 			return True
-			
+
+		#print(np.mean(np.abs(avg2)))
+		# Do not check convergence before energy has arrived
+		if np.max(np.abs(avg2)) < min_field:
+			return False
+
+		error = np.mean(np.abs(avg2 - avg1) / (np.abs(avg1) + 1e-20))
+		if print_err and len(energy_history)%err_rate==0:	print("ERROR: ", error)		# use of len(energy_history as a counter)
+
 		return error < tolerance
 
 	return stop_when_field_const
 
 
-def compute_freqs(f_min, f_max, f_res):
+def compute_freqs(f_min, f_max, f_res=None, n_freqs=None):
 	"""
-	Computes the frequencies in a given range with a given resolution
+	Computes the frequencies in a given range with a given resolution or n_freqs
 	"""
+
+	if n_freqs is None and f_res is None:
+		raise Exception("Must specify either n_freqs or f_res")
+	elif n_freqs is not None and f_res is not None:
+		raise Exception("Must specify either n_freqs or f_res; specifying both parameters can lead to ambiguous behavior.")
+
 	n_freqs = round((f_max - f_min)/f_res) + 1
 	freqs = np.linspace(f_min, f_max, n_freqs)
 	return freqs
 
 
-def write_output(*args):
+def write_output(*args, name='output.txt'):
 	"""
 	Writes output to the file output.txt
 	If file not exists is created in working directory

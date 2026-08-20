@@ -17,17 +17,16 @@ Commands:
         crea el GIF
     
     feh -a nom.gif
+
     gifview --geometry NxN nom.gif
         veure el GIF (espai per passar de frame, [r]einiciar, [a]nimar)
-
-    python3 -m folder.nom.py
-
-    export OMP_NUM_THREADS=8
 
     mpirun -np 8 python3 script.py
 
     du -sh * .[^.]* 2>/dev/null | sort -h | tail -20
         Buscar arxius pesats (grans)
+
+
 
     scp agonzalezc@NOP01.icfo.es:/home/agonzalezc/file /home/arnaugc/ICFO/MEEP/server
         SSH copiar del server al PC
@@ -36,6 +35,41 @@ Commands:
         SSH copiar del PC al server
 
     sudo openfortivpn vpn.icfo.net:443 -u agonzalezc -o codiForti --trusted-cert f5fd42a260ad784e313953d3968c72f98372fc230ae6f48ea96e1c4d98c99b6b
+
+
+
+    screen -S name
+        crea consola que s'executa en segon pla
+    
+    screen -ls
+        et mostra les consoles actuals d'screeen
+
+    screen -r name
+        es reconnecta a la consola
+
+    screen -X -S name quit
+        elimina la consola
+
+
+
+    ps -eo pid,ppid,pgid,sid,stat,cmd | grep -E 'mpirun|hydra_pmi_proxy|python' | grep -v grep
+        Obtenir PIDs dels processos que estan executant la simulació, exemple d'output:
+            26431  4098 26431  4098 S+   mpirun -np 8 python3 simulations.py
+            26432 26431 26432 26432 Ss   /home/agonzalezc/software/miniconda3/envs/pmp/bin/hydra_pmi_proxy --control-port NOP01.icfo.es:39151 --rmk user --launcher ssh --demux poll --pgid 0 --retries 10 --usize -2 --pmi-port 0 --gpus-per-proc -2 --gpu-subdevs-per-proc -2 --proxy-id 0
+            26433 26432 26433 26433 Rsl  python3 simulations.py
+            26434 26432 26434 26434 Rsl  python3 simulations.py
+            ...
+
+    kill -STOP 10690 10691 10692 10693 10694 10695 10696 10697 10698 10699
+        Envia un SIGSTOP als processos
+
+    kill -CONT 10690 10691 10692 10693 10694 10695 10696 10697 10698 10699
+        Envia el SIGCONT als processos
+
+    ps -o pid,ppid,pgid,stat,cmd -p 10690,10691,10692,10693,10694,10695,10696,10697,10698,10699
+        Veure l'estat dels processos
+
+
 
 
 
@@ -79,11 +113,6 @@ MEEP:
 
 
 
-    
-
-
-
-
 RESUM photonic crystals book
 
 Introduccio:
@@ -106,33 +135,3 @@ Introduccio:
     direcció i de qualsevol font (són sempre reflectors omnidireccionals).
 
 
-
-ABANS CANVIAR EL NOM DEL OUTPUT!!!!!!!!!!!
-kill -CONT 10690 10691 10692 10693 10694 10695 10696 10697 10698 10699
-ps -o pid,ppid,pgid,stat,cmd -p 10690,10691,10692,10693,10694,10695,10696,10697,10698,10699
-
-10690  4098 10690 T    mpirun -np 8 python3 sims2.py
-10691 10690 10691 Ts   /home/agonzalezc/software/miniconda3/envs/pmp/bin/hydra_pmi_proxy --control-port NOP01.icfo.es:45749 --rmk user --laun
-10692 10691 10692 Tsl  python3 sims2.py
-10693 10691 10693 Tsl  python3 sims2.py
-10694 10691 10694 Tsl  python3 sims2.py
-10695 10691 10695 Tsl  python3 sims2.py
-10696 10691 10696 Tsl  python3 sims2.py
-10697 10691 10697 Tsl  python3 sims2.py
-10698 10691 10698 Tsl  python3 sims2.py
-10699 10691 10699 Tsl  python3 sims2.py
-
-
-kill -STOP 10690 10691 10692 10693 10694 10695 10696 10697 10698 10699
-
-ps -eo pid,ppid,pgid,sid,stat,cmd | grep -E 'mpirun|hydra_pmi_proxy|python' | grep -v grep
-10690  4098 10690  4098 T    mpirun -np 8 python3 sims2.py
-10691 10690 10691 10691 Ts   /home/agonzalezc/software/miniconda3/envs/pmp/bin/hydra_pmi_proxy --control-port NOP01.icfo.es:45749 --rmk user --launcher ssh --demux poll --pgid 0 --retries 10 --usize -2 --pmi-port 0 --gpus-per-proc -2 --gpu-subdevs-per-proc -2 --proxy-id 0
-10692 10691 10692 10692 Tsl  python3 sims2.py
-10693 10691 10693 10693 Tsl  python3 sims2.py
-10694 10691 10694 10694 Tsl  python3 sims2.py
-10695 10691 10695 10695 Tsl  python3 sims2.py
-10696 10691 10696 10696 Tsl  python3 sims2.py
-10697 10691 10697 10697 Tsl  python3 sims2.py
-10698 10691 10698 10698 Tsl  python3 sims2.py
-10699 10691 10699 10699 Tsl  python3 sims2.py
