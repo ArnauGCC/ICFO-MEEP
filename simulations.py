@@ -26,14 +26,24 @@ gc.width_sim_scale = 1.5
 
 write_output("\n\n\n*******************************************************************")
 write_output("*******************************************************************")
-write_output("SIM N_WG=3.47 FORCE 2 MODES n_ext = 1 theta = 25º n_cells = 12 [Layer Stack]")
+write_output("SIM N_WG=3.47 n_ext = 1 theta = 25º n_cells = 12 wgw = 1.75 freq = 0.875 [Layer Stack, 2 MODES]")
 
-result = []
-for wg_w in compute_freqs(1, 2, 0.05):
-    write_output("WG WIDTH: ", wg_w)
-    gc.set_global_param(vars[3], wg_w)
-    freqs, res = gc.get_eff_in_freq_range(0.8, 1.8, f_res=0.025)
-    result.append(res)
-    write_output("")
+gc.src_freq = 0.875
+gc.set_global_param(vars[3], 1.75)
 
-write_output(result)
+parameters = gc.EffParams(25, 
+                          12, 
+                          0.5, 
+                          1.75, 
+                          gc.Interval(0, 1, res_s=0.025), 
+                          gc.Interval(0, 1, res_s=0.025))
+
+
+result, steps = gc.scan_all_parameters(0.875, parameters)
+    
+
+write_output("\n\n")
+write_output(result.dims)
+write_output(result.data)
+write_output("\n\n")
+write_output(steps.data)

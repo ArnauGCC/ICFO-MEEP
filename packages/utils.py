@@ -47,6 +47,9 @@ def make_stop_when_converged(center, size,	# Energy object
 
 		return error < tolerance
 
+	stop_when_field_const.center = center
+	stop_when_field_const.size = size	
+
 	return stop_when_field_const
 
 
@@ -72,7 +75,7 @@ def write_output(*args, name='output.txt'):
 	"""
 	if mp.am_master():
 		with open("output.txt", "a") as file:
-			file.write(" ".join(map(str, args)) + "\n")
+			file.write("  ".join(map(str, args)) + "\n")
 
 
 def find_max_efficiency_(coupler, param, min_s, max_s, n_steps, freq, stage, src_time, src_flux, do_ints=False):

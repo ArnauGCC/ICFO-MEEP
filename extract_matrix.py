@@ -1,109 +1,129 @@
 import re
 
 
-def extract_data(filename, parameter):
+def extract_quantity(text, quantity):
     """
-    Extract a parameter from a simulation output file.
+    Extract `quantity` (e.g. 0L, 0R, PR, PL, 1L) from every
+    WG WIDTH cycle.
 
     Returns:
-        A Python list of lists.
-        Each row corresponds to one WG WIDTH.
-        Each column corresponds to one frequency.
+        list[list[float]]
+
+    Rows    = WG WIDTH cycles
+    Columns = frequency points
+    Missing values are filled with 0.0
     """
 
-    parameter = str(parameter).strip().upper()
+    # ------------------------------------------------------------
+    # Find the first WG WIDTH
+    # Everything before it is ignored.
+    # ------------------------------------------------------------
+    first_cycle = re.search(
+        r"WG WIDTH:\s*[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?",
+        text
+    )
 
-    #if parameter not in {"0", "1", "2", "P", "S"}:
-    #    raise ValueError("Parameter must be one of: 0, 1, 2, P, S")
-
-    with open(filename, "r", encoding="utf-8") as file:
-        text = file.read()
-
-    # Split the file into WG WIDTH blocks
-    blocks = re.split(r"(?=WG WIDTH:\s*)", text)
-
-    matrix = []
-
-    for block in blocks:
-
-        # Find WG WIDTH
-        width_match = re.search(
-            r"WG WIDTH:\s*([0-9.eE+-]+)",
-            block
-        )
-
-        if width_match is None:
-            continue
-
-        values = []
-
-        # Find each Freq section
-        freq_blocks = re.finditer(
-            r"Freq:\s*[0-9.eE+-]+:\s*(.*?)(?=Freq:|$)",
-            block,
-            re.DOTALL
-        )
-
-        for match in freq_blocks:
-
-            freq_data = match.group(1)
-
-            # Find the requested parameter
-            value_match = re.search(
-                rf"^\s*{re.escape(parameter)}:\s*"
-                r"([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)",
-                freq_data,
-                re.MULTILINE
-            )
-
-            if value_match:
-                values.append(float(value_match.group(1)))
-
-        if values:
-            matrix.append(values)
-
-    if not matrix:
+    if not first_cycle:
         return []
 
-    # Check that all rows have the same length
-    lengths = [len(row) for row in matrix]
+    text = text[first_cycle.start():]
 
-    if len(set(lengths)) != 1:
-        raise ValueError(
-            f"Different numbers of frequencies found: {lengths}"
+    # ------------------------------------------------------------
+    # Split into WG WIDTH cycles
+    # ------------------------------------------------------------
+    cycles = re.split(
+        r"(?=WG WIDTH:\s*[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)",
+        text
+    )
+
+    cycles = [
+        cycle.strip()
+        for cycle in cycles
+        if cycle.strip()
+    ]
+
+    results = []
+
+    # ------------------------------------------------------------
+    # Process every WG WIDTH cycle
+    # ------------------------------------------------------------
+    for cycle in cycles:
+
+        # Find every frequency block
+        freq_pattern = (
+            r"Freq:\s*"
+            r"([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)"
+            r"\s*:\s*"
+            r"(.*?)(?=\n\s*Freq:|\Z)"
         )
 
-    return matrix
+        freq_matches = re.findall(
+            freq_pattern,
+            cycle,
+            flags=re.DOTALL
+        )
 
+        row = []
 
-def main():
+        for freq, block in freq_matches:
 
-    filename = "server/output.txt".strip()
+            # Match:
+            #
+            # PR: 0.123
+            #
+            # or:
+            #
+            # 1L: np.float64(0.123)
+            #
+            value_pattern = (
+                rf"^\s*{re.escape(quantity)}\s*:\s*"
+                rf"(?:np\.float64\()? "
+                rf"([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)"
+            )
 
-    parameter = '0L'
+            match = re.search(
+                value_pattern,
+                block,
+                flags=re.MULTILINE | re.VERBOSE
+            )
 
-    try:
-
-        matrix = extract_data(filename, parameter)
-
-        print("\nMatrix:")
-        print("[")
-
-        for i, row in enumerate(matrix):
-
-            if i < len(matrix) - 1:
-                print(f"    {row},")
+            if match:
+                row.append(float(match.group(1)))
             else:
-                print(f"    {row}")
+                row.append(0.0)
 
-        print("]")
+        results.append(row)
 
-    except FileNotFoundError:
-        print(f"File not found: {filename}")
+    # ------------------------------------------------------------
+    # Make every row have the same number of columns
+    # ------------------------------------------------------------
+    max_columns = max(
+        (len(row) for row in results),
+        default=0
+    )
 
-    except ValueError as e:
-        print(f"Error: {e}")
+    for row in results:
+        while len(row) < max_columns:
+            row.append(0.0)
 
+    return results
+
+
+# ================================================================
+# Example
+# ================================================================
 
 if __name__ == "__main__":
-    main()
+
+    with open("outs.txt", "r", encoding="utf-8") as f:
+        text = f.read()
+
+    quantity = input(
+        "Quantity to extract (e.g. 0L, 0R, PR, PL, 1L): "
+    ).strip()
+
+    matrix = extract_quantity(text, quantity)
+
+    # Print each row separately with a line return
+    for row in matrix:
+        print(row, ',')
