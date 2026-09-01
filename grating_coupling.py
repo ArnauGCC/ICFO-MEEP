@@ -3,6 +3,7 @@ import meep as mp
 import math
 import matplotlib.pyplot as plt
 import numpy as np
+import copy
 from packages.figures import *
 from packages.utils import *
 
@@ -73,15 +74,6 @@ class GratingCoupler:
 
 
 	@dataclasses.dataclass
-	class Mode:
-		alpha:		np.array
-		vgrp:		np.array
-		kpoints:	list
-		kdom:		list
-		cscale:		np.array
-
-
-	@dataclasses.dataclass
 	class EffParams:						# Variables that can be used find max efficiency
 		"""
 		This parameters must be set to a simple type (int, float) for executing the simulation.
@@ -90,8 +82,8 @@ class GratingCoupler:
 		theta_deg:			float	| GratingCoupler.Interval | None = None		# Degrees of inclination from normal incidence to the waveguide
 		n_cells:			int		| GratingCoupler.Interval | None = None		# Number of cells of the grating
 		grat_period:		float	| GratingCoupler.Interval | None = None		# The grating period is gp = eff_params['grat_period'] / freq
-		wg_width_factor:	float	| GratingCoupler.Interval | None = None		# The waveguide widyh is wg_width = eff_params["wg_width_factor"] / (2*freq)
-		grat_height_factor:	float	| GratingCoupler.Interval | None = None		# The grating height is gh = eff_params['grat_height_factor'] * wg_width
+		grat_height:		float	| GratingCoupler.Interval | None = None		# The waveguide widyh is wg_width = eff_params["grat_height"] / (2*freq)
+		grat_depth_factor:	float	| GratingCoupler.Interval | None = None		# The grating height is gh = eff_params['grat_depth_factor'] * wg_width
 		grat_duty_cycle:	float	| GratingCoupler.Interval | None = None		# Sets the grating duty cycle
 
 
@@ -110,21 +102,23 @@ class GratingCoupler:
 	compute_eff = compute_eff_by_modes or compute_eff_by_power		# Computes the efficiency of the coupled waveguide
 
 	""" PARAMETERS """
-	eff_params = EffParams(16, 25, 1, 1, 1/2, 0.5)		
+	eff_params = EffParams(25, 12, 1, 1, 1/2, 0.5)		
 	#eff_params = {							 
-	#	"theta_deg":            16, 		
-	#	"n_cells":				25,			
+	#	"theta_deg":            25, 		
+	#	"n_cells":				12,			
 	#	"grat_period":		  	1, 			
-	#	"wg_width_factor":      1,			
-	#	"grat_height_factor":   1/2,		
+	#	"grat_height":      1,			
+	#	"grat_depth_factor":   1/2,		
 	#	"grat_duty_cycle":		0.5,		
 	#}
 
-	n_wg = 1.5								# waveguide refraction index
-	n_wlengths_power_measure = 30			# Number of wavelengths spent to measure the efficiency: self.compute_power or self.compute_modes_coeff
+	n_grat = 1.5							# grating refraction index
+	grat_width = mp.inf
 	bottom_layers: list[Layer]=[]			# Layers that can be added at the bottom of the waveguide
-	n_default = 1							# Default refraction index for the simulation
+	wg_layer:	int = None					# if 0: wg is grating, if wg_layer = n, then is the n-th bottom layer (from top to bottom), by default (None) the waveguide is assigned to the first layer with highest refraction index
 	src_freq = 1							# Frequency of the source (in units of 1/um)
+	n_wlengths_power_measure = 30			# Number of wavelengths spent to measure the efficiency: self.compute_power or self.compute_modes_coeff
+	n_default = 1							# Default refraction index for the simulation
 	n_modes_to_compute = 1					# If compute_by_modes_not_power, then efficiency is computed by the first n_modes_to_compute
 
 	res_factor = 20							# Number of pixels for wavelength in the highest refraction index 
@@ -140,8 +134,52 @@ class GratingCoupler:
 		"""
 		Returns the maximum refractive index in the simulation
 		"""
-		if len(self.bottom_layers) == 0: return self.n_wg
-		return max(max(l.index for l in self.bottom_layers), self.n_wg)
+		if len(self.bottom_layers) == 0: return self.n_grat
+		return max(max(l.index for l in self.bottom_layers), self.n_grat)
+
+
+	def set_wg_layer(self):
+		n_max = self.n_max()
+		if self.n_grat == n_max:
+			self.wg_layer = 0
+		else:
+			i = 1
+			for l in self.bottom_layers:
+				if l.index == n_max:
+					self.wg_layer = i
+					break
+				i += 1
+
+
+	def n_wg(self):
+		"""
+		Returns the refraction index of the waveguide
+		"""
+		if self.wg_layer is not None and (not isinstance(self.wg_layer, int) or self.wg_layer < 0 or self.wg_layer > len(self.bottom_layers)):
+			raise Exception("The value of wg_layer must be an int between 0 and the length of bottom_layers:\n" \
+							"if 0: wg is grating, if wg_layer = n, then is the n-th bottom layer (from top to bottom), " \
+							"by default (None) the waveguide is assigned to the first layer with highest refraction index.")
+		elif self.wg_layer is None:		self.set_wg_layer()
+
+
+		if self.wg_layer == 0:			return self.n_grat
+		else:							return self.bottom_layers[self.wg_layer-1].index
+
+
+	def wg_height(self):
+		"""
+		Returns the waveguide width
+		"""
+		if self.wg_layer is not None and (not isinstance(self.wg_layer, int) or self.wg_layer < 0 or self.wg_layer > len(self.bottom_layers)):
+			raise Exception("The value of wg_layer must be an int between 0 and the length of bottom_layers:\n" \
+							"if 0: wg is grating, if wg_layer = n, then is the n-th bottom layer (from top to bottom), " \
+							"by default (None) the waveguide is assigned to the first layer with highest refraction index.")
+		elif self.wg_layer is None:		self.set_wg_layer()
+
+
+		if self.wg_layer == 0:			return self.eff_params.grat_height
+		else:							return self.bottom_layers[self.wg_layer-1].height
+
 
 
 	def comp_resolution(self, res_factor=res_factor, freq=src_freq):
@@ -215,31 +253,10 @@ class GratingCoupler:
 		coeffs = modes.alpha
 		forward = np.abs(coeffs[:, :, 0 if forward_fields else 1])**2
 
-		"""					
-		print("POWER: ", mp.get_fluxes(wg_region)[0])
-		print("")
-		print("")
-		print(modes)
-		print("")
-		print("")
-
-		alpha = modes.alpha[:, 0, :]
-
-		P_forward = np.abs(alpha[:, 0])**2
-		P_backward = np.abs(alpha[:, 1])**2
-
-		print("forward:", P_forward)
-		print("backward:", P_backward)
-
-		P_net = np.sum(P_forward - P_backward)
-
-		print("net modal power:", P_net)
-		"""
-
 		return forward
 
 
-	def compute_initial_parameters(self, gp, wg_width, gh, gdc):
+	def compute_initial_parameters(self, gp, gh, gdc):
 		"""
 		Computes the parameters used to start the simulation
 		"""
@@ -249,26 +266,37 @@ class GratingCoupler:
 
 
 		sx = int(self.eff_params.n_cells*gp*2.25)
-		sy = wg_width+2*dpml+pad_src_wg
+		grat_height = self.eff_params.grat_height
+		sy = grat_height+2*dpml+pad_src_wg
 		for l in self.bottom_layers:
-			if l.width != mp.inf:	break
-			sy += l.width
+			if l.height == mp.inf:	break
+			sy += l.height
 		sy = int(sy+pad_inf)
 
-		theta = math.radians(90 - self.eff_params.theta_deg)
-		wg_y = sy/2 - dpml - pad_src_wg - wg_width/2
-		geometry = create_h_grating(gp, gh, gdc, self.eff_params.n_cells, wg_width, self.n_wg, mp.Vector3(-sx/4 + pad_src_wg*0.9*math.tan(math.radians(self.eff_params.theta_deg)), wg_y), n_ext=self.n_default)
+		offsx = -sx*(self.width_sim_scale-1)/2		# the scale factor to increment the width sim only adds space between the grating and the right region
 
-		bottom = wg_y - wg_width/2
+		grating = Layer(self.n_grat, height=grat_height, width=self.grat_width)
+		theta = math.radians(90 - self.eff_params.theta_deg)
+		grat_y = sy/2 - dpml - pad_src_wg - grat_height/2
+		geometry = create_h_grating(gp, gh, gdc, self.eff_params.n_cells, grating, mp.Vector3(-sx/4 + pad_src_wg*0.9*math.tan(math.radians(self.eff_params.theta_deg)) + offsx, grat_y), n_ext=self.n_default)
+		wg_y = grat_y
+		if self.wg_layer is None: self.set_wg_layer()
+		i = 1
+		bottom = grat_y - grat_height/2
 		for l in self.bottom_layers:
-			if l.width == mp.inf:
+			if l.height == mp.inf:
+				if i == self.wg_layer:
+					wg_y = bottom - pad_inf/2
 				geometry.append(create_h_waveguide(bottom - pad_inf/2, pad_inf, l.index))
-				break	
-			geometry.append(create_h_waveguide(bottom - l.width/2, l.width, l.index))
-			bottom -= l.width
+				break
+			if i == self.wg_layer:
+				wg_y = bottom - l.height/2
+			geometry.append(create_h_waveguide(bottom - l.height/2, l.height, l.index))
+			bottom -= l.height
+			i += 1
 		
 		src_size = mp.Vector3(x = sx/2)
-		src_center = mp.Vector3(-sx/2 + src_size.x/2, sy/2 - dpml)
+		src_center = mp.Vector3(-sx/2 + src_size.x/2 + offsx, sy/2 - dpml)
 		k = mp.Vector3(1).rotate(mp.Vector3(0, 0, -1), theta)
 		beam_w0 = sx/2
 
@@ -294,7 +322,7 @@ class GratingCoupler:
 		return dpml, sx, sy, wg_y, geometry, src_size, src_center, k, beam_w0, src
 
 
-	def create_flux_regions_and_stop_conds(self, sx, dpml, src_size, src_center, resolution, wg_y, wg_width):
+	def create_flux_regions_and_stop_conds(self, sx, dpml, src_size, src_center, resolution, wg_y, wg_height):
 		src_fr = mp.FluxRegion(center=src_center - mp.Vector3(y=0.1), size=src_size*1.2)
 
 		src_conv_region_size = mp.Vector3(src_size.x*1.2, 0.4)
@@ -304,15 +332,15 @@ class GratingCoupler:
 												 tolerance=1e-4, min_field=50, max_time=25)
 
 
-		conv_region_size = mp.Vector3(sx/4, wg_width)
+		conv_region_size = mp.Vector3(sx/4, wg_height)
 		conv_region_center = mp.Vector3((sx - conv_region_size.x)/2, wg_y)
 		stop_cond = make_stop_when_converged(center=conv_region_center, size=conv_region_size,
-											 window=int(2*10*resolution/(self.src_freq*self.n_wg)), print_err=False, 
+											 window=int(2*10*resolution/(self.src_freq*self.n_wg())), print_err=False, 
 											 tolerance=1e-5, min_field=50, err_rate=5000, max_time=100)
 
 
-		wg_fr_left = mp.FluxRegion(center=mp.Vector3(-sx/2 + 2*dpml, wg_y), size=mp.Vector3(y=wg_width*3), direction=mp.X)
-		wg_fr_right = mp.FluxRegion(center=mp.Vector3(sx/2 - 2*dpml, wg_y), size=mp.Vector3(y=wg_width*3), direction=mp.X)
+		wg_fr_left = mp.FluxRegion(center=mp.Vector3(-sx/2 + 2*dpml, wg_y), size=mp.Vector3(y=wg_height*3), direction=mp.X)
+		wg_fr_right = mp.FluxRegion(center=mp.Vector3(sx/2 - 2*dpml, wg_y), size=mp.Vector3(y=wg_height*3), direction=mp.X)
 
 		
 		return src_fr, src_stop_cond, stop_cond, wg_fr_left, wg_fr_right
@@ -337,16 +365,16 @@ class GratingCoupler:
 		if not self.compute_src_time and src_time is None:
 			src_time = self.src_time
 
+		
+		grat_height =	self.eff_params.grat_height
+		gp = 			self.eff_params.grat_period
+		gdc = 			self.eff_params.grat_duty_cycle
+		gh = 			self.eff_params.grat_depth_factor * grat_height
 
-		wg_width = 	self.eff_params.wg_width_factor / (2*self.n_wg)		# It's assumed central frquency = 1
-		gp = 		self.eff_params.grat_period
-		gdc = 		self.eff_params.grat_duty_cycle
-		gh = 		self.eff_params.grat_height_factor * wg_width
 
-
-		dpml, sx, sy, wg_y, geometry, src_size, src_center, k, beam_w0, src = self.compute_initial_parameters(gp, wg_width, gh, gdc)
+		dpml, sx, sy, wg_y, geometry, src_size, src_center, k, beam_w0, src = self.compute_initial_parameters(gp, gh, gdc)
 		resolution = self.manual_res if self.set_manual_resolution else self.comp_resolution()
-		src_fr, src_stop_cond, stop_cond, wg_fr_left, wg_fr_right = self.create_flux_regions_and_stop_conds(sx, dpml, src_size, src_center, resolution, wg_y, wg_width)
+		src_fr, src_stop_cond, stop_cond, wg_fr_left, wg_fr_right = self.create_flux_regions_and_stop_conds(sx, dpml, src_size, src_center, resolution, wg_y, self.wg_height())
 		df = 0
 		nfreq =  1
 		if self.h5_name != "":	self.h5_name = self.h5_name + '-'
@@ -376,7 +404,7 @@ class GratingCoupler:
 							default_material=mp.Medium(index=self.n_default)
 							)
 
-		
+		result = None
 		if self.run_meep:
 			if self.end_src and self.compute_eff:
 				wg_region_left = sim.add_mode_monitor(freq, df, nfreq, wg_fr_left)
@@ -384,7 +412,7 @@ class GratingCoupler:
 
 			run_args = [mp.at_beginning(mp.with_prefix(f"{self.h5_name}", mp.output_epsilon))]
 			if self.h5_file_transistent:
-				run_args.append(mp.at_every(1/(self.h5_frames_per_wlength*freq), mp.to_appended(f"{self.h5_name}stp_cond-ez", mp.output_efield_z)))
+				run_args.append(mp.at_every(1/4, mp.to_appended(f"{self.h5_name}stp_cond-ez", mp.output_efield_z)))
 
 			sim.run(*run_args,
 					until=stop_cond if self.compute_src_time else src_time)
@@ -512,14 +540,14 @@ class GratingCoupler:
 		if param not in ["theta_deg",  "grat_period", "n_cells"]:
 			self.compute_src_power = False
 
-			wg_width = 	self.eff_params.wg_width_factor / (2*self.n_wg)
-			gp = 		self.eff_params.grat_period
-			gdc = 		self.eff_params.grat_duty_cycle
-			gh = 		self.eff_params.grat_height_factor * wg_width
-			resolution = self.manual_res if self.set_manual_resolution else int(self.res_factor * self.n_max() * freq)
-	
-			dpml, sx, sy, wg_y, geometry, src_size, src_center, k, beam_w0, src = self.compute_initial_parameters(gp, wg_width, gh, gdc)
-			src_fr, src_stop_cond, stop_cond, wg_fr_left, wg_fr_right = self.create_flux_regions_and_stop_conds(sx, dpml, src_size, src_center, resolution, wg_y, wg_width)
+			grat_height = 	self.eff_params.grat_height
+			gp = 			self.eff_params.grat_period
+			gdc = 			self.eff_params.grat_duty_cycle
+			gh = 			self.eff_params.grat_depth_factor * grat_height
+			resolution = 	self.manual_res if self.set_manual_resolution else int(self.res_factor * self.n_max() * freq)
+
+			dpml, sx, sy, wg_y, geometry, src_size, src_center, k, beam_w0, src = self.compute_initial_parameters(gp, gh, gdc)
+			src_fr, src_stop_cond, stop_cond, wg_fr_left, wg_fr_right = self.create_flux_regions_and_stop_conds(sx, dpml, src_size, src_center, resolution, wg_y, self.wg_height())
 
 			sim_src = mp.Simulation(cell_size=mp.Vector3(sx, sy),
 									sources=src,
@@ -538,11 +566,11 @@ class GratingCoupler:
 			src_power = None
 
 
-		if param  in ["wg_width_factor"]:
+		if param  in ["grat_height"]:
 			self.compute_src_time = False
 
-			"""Time for converged state is maximum for larger wg_widths"""
-			if param == "wg_width_factor":
+			"""Time for converged state is maximum for larger grat_widths"""
+			if param == "grat_height":
 				self.set_global_param(param, max_step)
 
 			sim = mp.Simulation(cell_size=mp.Vector3(sx, sy),
@@ -590,8 +618,8 @@ class GratingCoupler:
 		Interval(5, 50, 16),		# Interval for max eff search of theta_deg
 		Interval(5, 40, 8),			# Interval for max eff search of n_cells
 		Interval(0.5, 2, 16),		# Interval for max eff search of grat_period
-		Interval( 0.5, 1.5, 11),	# Interval for max eff search of wg_width_factor
-		Interval(0.2, 0.8, 7),		# Interval for max eff search of grat_height_factor
+		Interval( 0.5, 1.5, 11),	# Interval for max eff search of grat_height
+		Interval(0.2, 0.8, 7),		# Interval for max eff search of grat_depth_factor
 		Interval(0.2, 0.8, 7)		# Interval for max eff search of grat_duty_cycle
 	)
 
@@ -690,13 +718,15 @@ class GratingCoupler:
 
 			else:
 				result = []
-				result_steps = []
+				result_steps = [steps]
 				for step in steps:
 					write_output("  "*i, f"Executing with {param.name}: ", step)
-					setattr(opt_params, param.name, step)
-					data, steps = self.scan_all_parameters(freq, opt_params)
+					_opt_params = copy.copy(opt_params)
+					setattr(_opt_params, param.name, step)
+					data, steps = self.scan_all_parameters(freq, _opt_params)
 					result.append(data.data)
-					result_steps.append(steps.data)
+
+				result_steps.append(steps.data)
 
 				return self.NamedMatrix(result, parameters), self.NamedMatrix(result_steps, parameters) 
 

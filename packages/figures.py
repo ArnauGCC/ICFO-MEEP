@@ -5,8 +5,15 @@ import dataclasses
 
 @dataclasses.dataclass
 class Layer:
-    width: float
-    index:  float
+    """
+    A Layer can be either horizontal or vertical, so the width and height have different implications:
+
+        In a horizontal wg, the fields propagate along the width of the Layer, while the height determines the supported modes.
+        In a vertical wg, the fields propagate along the height of the Layer, while the width determines the supported modes.
+    """
+    index:  float=None
+    width:  float=mp.inf
+    height: float=mp.inf
 
 
 def create_ideal_prism(alpha_deg, n, left_vertex:mp.Vector3, sx, sy):
@@ -47,31 +54,70 @@ def create_prism(alpha_deg, n, base_length, offsx=0, offsy=0, height=0):
     return mp.Prism(base_prism, height=h, axis=mp.Vector3(z=1), material=mp.Medium(index=n))
 
 
-def create_h_waveguide(center_y=0, width=1, n=1):
-    return mp.Block(center=mp.Vector3(0, center_y), 
-                    size=mp.Vector3(mp.inf, width), 
-                    material=mp.Medium(index=n))
+def create_h_waveguide(center_y: float=None, height: float=None, n: float=None, layer: Layer=None, center_x: float=None, width: float=mp.inf):
+    """
+    Creates an horitzontal waveguide centered at center_y, parameters can be specified using a Layer.
+    If width is not infinite, then center_x must be specified
+    """
+    if center_y is None:
+        raise Exception("To create an horitzontal wg center_y must be specified.")
+
+    if layer is not None:
+        width = layer.width
+        height = layer.height
+        n = layer.index
+
+    if height is None or n is None:
+        raise Exception("To create an horitzontal waveguide height and n must be specified.")
+
+    if width == mp.inf or center_x is not None:
+        return mp.Block(center=mp.Vector3(0 if center_x is None else center_x, center_y), 
+                        size=mp.Vector3(width, height), 
+                        material=mp.Medium(index=n))
+    else:
+        raise Exception("If the width is not mp.inf (infinte waveguide), then center_x must be specified.")
 
 
-def create_v_waveguide(center_x, width, n):
-    return mp.Block(center=mp.Vector3(center_x), 
-                    size=mp.Vector3(width, mp.inf), 
-                    material=mp.Medium(index=n))
+    
 
+def create_v_waveguide(center_x: float=None, width: float=None, n: float=None, layer: Layer=None, center_y: float=None, height: float=mp.inf):
+    """
+    Creates a vertical waveguide centered at center_x, parameters can be specified using a Layer.
+    If height is not infinite, then center_y must be specified
+    """
+    if center_x is None:
+        raise Exception("To create an horitzontal wg center_y must be specified.")
 
-def create_h_grating(gr_period, gr_height, gr_duty_cycle, n_cells, wg_width, n,
+    if layer is not None:
+        width = layer.width
+        height = layer.height
+        n = layer.index
+
+    if width is None or n is None:
+        raise Exception("To create an horitzontal waveguide width and n must be specified.")
+
+    if height == mp.inf or center_y is not None:
+        return mp.Block(center=mp.Vector3(center_x, 0 if center_y is None else center_y), 
+                        size=mp.Vector3(width, height), 
+                        material=mp.Medium(index=n))
+    else:
+        raise Exception("If the height is not mp.inf (infinte waveguide), then center_y must be specified.")
+
+    
+
+def create_h_grating(gr_period, gr_height, gr_duty_cycle, n_cells, layer: Layer,
                      center=mp.Vector3(), gr_up=True, gr_down=False, n_ext=1, security_factor=1.1):
     """
-    Creates an (infinite) horitzontal waveguide with a grating.
+    Creates an horitzontal waveguide with a grating.
     gr_period:      Period of the grating
     gr_height:      How deep are the holes
     gr_duty_cycle:  
     ...
-    security_factor:  [>= 1] This parameter doesn't affect to the hole deep- Factor to make the grating holes bigger than the grating height. This is to avoid that the holes are closed due to the resolution of the simulation.
+    security_factor:  [>= 1] This parameter doesn't affect to the hole depth- Factor to make the grating holes bigger than the grating height. This is to avoid that the holes are closed due to the resolution of the simulation.
     """
 
     wg_y = center.y
-    geometry = [create_h_waveguide(wg_y, wg_width, n)]
+    geometry = [create_h_waveguide(wg_y, layer=layer, center_x=center.x)]
 
 
     length = gr_period * n_cells
@@ -79,7 +125,8 @@ def create_h_grating(gr_period, gr_height, gr_duty_cycle, n_cells, wg_width, n,
     gdc = 1-gr_duty_cycle
 
     if gr_up:
-        gy = wg_y + wg_width/2  + (security_factor/2 - 1)*gr_height
+        gy = wg_y + layer.height/2  + (security_factor/2 - 1)*gr_height
+
 
         for x in range(n_cells):
             geometry.append(mp.Block(center=mp.Vector3(left + gr_period*(x + 0.5*(1-gdc)), gy),
@@ -89,7 +136,7 @@ def create_h_grating(gr_period, gr_height, gr_duty_cycle, n_cells, wg_width, n,
                             )
 
     if gr_down: 
-        gy = wg_y - wg_width/2 + (1 - security_factor/2)*gr_height
+        gy = wg_y - layer.height/2 + (1 - security_factor/2)*gr_height
 
         for x in range(n_cells):
             geometry.append(mp.Block(center=mp.Vector3(left + gr_period*(x + 0.5*(1-gdc)), gy),
