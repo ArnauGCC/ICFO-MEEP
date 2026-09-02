@@ -10,8 +10,8 @@ vars = gc.get_variables()           # ['theta_deg', 'n_cells', 'grat_period', 'g
 
 gc.set_global_param(vars[0], 45)
 gc.set_global_param(vars[1], 20)
-gc.set_global_param(vars[2], 0.41)
-gc.set_global_param(vars[3], 0.7)
+gc.set_global_param(vars[2], 0.725)
+gc.set_global_param(vars[3], 1.175)
 gc.set_global_param(vars[4], 0.5)
 gc.set_global_param(vars[5],0.5)
 
@@ -30,7 +30,6 @@ gc.width_sim_scale = 1.4
 
 gc.compute_eff_by_modes = True
 gc.n_modes_to_compute = 8
-
 
 #gc.run_meep = False
 #gc.h5_frames_per_wlength=20
@@ -64,7 +63,7 @@ write_output(steps.data)
 """
 
 
-
+"""
 write_output("\n\n\n*******************************************************************")
 write_output("******************************************************************")
 write_output("SIM LAB Grating n_cells = 20 changing height - depth")
@@ -94,6 +93,26 @@ parameters = gc.EffParams(theta_deg=45,
                           grat_period=gc.Interval(0.3, 1.3, res_s=0.025), 
                           grat_height=gc.Interval(0.2, 1.2, res_s=0.025), 
                           grat_depth_factor=0.5, 
+                          grat_duty_cycle=0.5)
+
+result, steps = gc.scan_all_parameters(gc.src_freq, parameters)
+
+write_output("\n\n")
+write_output(result.dims)
+write_output(result.data)
+write_output("\n\n")
+write_output(steps.data)"""
+
+
+write_output("\n\n\n*******************************************************************")
+write_output("******************************************************************")
+write_output("SIM LAB Grating n_cells = 20 changing period - height - depth")
+
+parameters = gc.EffParams(theta_deg=45, 
+                          n_cells=20, 
+                          grat_period=gc.Interval(0.675, 0.775, res_s=0.025), 
+                          grat_height=gc.Interval(1, 1.2, res_s=0.025), 
+                          grat_depth_factor=gc.Interval(0.825, 0.725, res_s=0.025), 
                           grat_duty_cycle=0.5)
 
 result, steps = gc.scan_all_parameters(gc.src_freq, parameters)

@@ -118,6 +118,7 @@ class GratingCoupler:
 	wg_layer:	int = None					# if 0: wg is grating, if wg_layer = n, then is the n-th bottom layer (from top to bottom), by default (None) the waveguide is assigned to the first layer with highest refraction index
 	src_freq = 1							# Frequency of the source (in units of 1/um)
 	n_wlengths_power_measure = 30			# Number of wavelengths spent to measure the efficiency: self.compute_power or self.compute_modes_coeff
+	time_until_stop_convergence = 100		# Time waited until the computation of the simulation convergence is stopped 
 	n_default = 1							# Default refraction index for the simulation
 	n_modes_to_compute = 1					# If compute_by_modes_not_power, then efficiency is computed by the first n_modes_to_compute
 
@@ -336,7 +337,7 @@ class GratingCoupler:
 		conv_region_center = mp.Vector3((sx - conv_region_size.x)/2, wg_y)
 		stop_cond = make_stop_when_converged(center=conv_region_center, size=conv_region_size,
 											 window=int(2*10*resolution/(self.src_freq*self.n_wg())), print_err=False, 
-											 tolerance=1e-5, min_field=50, err_rate=5000, max_time=100)
+											 tolerance=1e-5, min_field=50, err_rate=5000, max_time=self.time_until_stop_convergence)
 
 
 		wg_fr_left = mp.FluxRegion(center=mp.Vector3(-sx/2 + 2*dpml, wg_y), size=mp.Vector3(y=wg_height*3), direction=mp.X)

@@ -28,7 +28,7 @@ def extract_matrix(filename, parameter):
             # Executing with grat_depth_factor:   0.025
             # ---------------------------------------------------------
             match = re.search(
-                r"Executing with grat_depth_factor:\s*([-+0-9.eE]+)",
+                r"Executing with grat_period:\s*([-+0-9.eE]+)",
                 line
             )
 
@@ -48,7 +48,7 @@ def extract_matrix(filename, parameter):
             # Executing with grat_duty_cycle:   0.025
             # ---------------------------------------------------------
             match = re.search(
-                r"Executing with grat_duty_cycle:\s*([-+0-9.eE]+)",
+                r"Executing with grat_height:\s*([-+0-9.eE]+)",
                 line
             )
 
