@@ -1,188 +1,157 @@
 #!/usr/bin/env python3
-
+"""
 import re
-import sys
-import numpy as np
+import argparse
 
 
 def extract_matrix(filename, parameter):
-    """
-    Extract a parameter from a simulation output file.
 
-    Rows    = grat_depth_factor
-    Columns = grat_duty_cycle
-    """
+    # Data structure:
+    # {
+    #     height1: {index1: value, index2: value, ...},
+    #     height2: {index1: value, index2: value, ...},
+    # }
+    data = {}
 
-    depth_blocks = {}
-    current_depth = None
-    current_duty = None
+    current_height = None
+    current_index = None
 
-    with open(filename, "r") as f:
+    # Matches:
+    # Height: 50.0nm
+    height_re = re.compile(r"^\s*Height:\s*([-+0-9.eE]+)\s*nm")
 
-        for line in f:
+    # Matches:
+    # INDEX: 1.05:
+    index_re = re.compile(r"^\s*INDEX:\s*([-+0-9.eE]+)\s*:")
 
-            # ---------------------------------------------------------
-            # Match grat_depth_factor
-            #
-            # Example:
-            # Executing with grat_depth_factor:   0.025
-            # ---------------------------------------------------------
-            match = re.search(
-                r"Executing with grat_period:\s*([-+0-9.eE]+)",
-                line
-            )
-
-            if match:
-                current_depth = float(match.group(1))
-
-                if current_depth not in depth_blocks:
-                    depth_blocks[current_depth] = {}
-
-                current_duty = None
-                continue
-
-            # ---------------------------------------------------------
-            # Match grat_duty_cycle
-            #
-            # Example:
-            # Executing with grat_duty_cycle:   0.025
-            # ---------------------------------------------------------
-            match = re.search(
-                r"Executing with grat_height:\s*([-+0-9.eE]+)",
-                line
-            )
-
-            if match:
-                current_duty = float(match.group(1))
-                continue
-
-            # ---------------------------------------------------------
-            # Match requested parameter
-            #
-            # Examples:
-            # PR: 0.0010925142429455018
-            # PL: 0.00014912595433007615
-            # 0L: 1.0737228423177608e-12
-            # ---------------------------------------------------------
-            match = re.match(
-                rf"\s*{re.escape(parameter)}:\s*([-+0-9.eE]+)",
-                line
-            )
-
-            if match and current_depth is not None and current_duty is not None:
-
-                value = float(match.group(1))
-
-                depth_blocks[current_depth][current_duty] = value
-
-    # -------------------------------------------------------------
-    # Sort depth factors -> matrix rows
-    # Sort duty cycles   -> matrix columns
-    # -------------------------------------------------------------
-    depths = sorted(depth_blocks.keys())
-
-    duties = sorted({
-        duty
-        for block in depth_blocks.values()
-        for duty in block.keys()
-    })
-
-    # -------------------------------------------------------------
-    # Create matrix
-    # -------------------------------------------------------------
-    matrix = np.full(
-        (len(depths), len(duties)),
-        np.nan,
-        dtype=float
+    # Matches:
+    # PR: 0.0051104578983831314
+    parameter_re = re.compile(
+        rf"^\s*{re.escape(parameter)}\s*:\s*([-+0-9.eE]+)"
     )
 
-    # -------------------------------------------------------------
-    # Fill matrix
-    # -------------------------------------------------------------
-    for i, depth in enumerate(depths):
+    with open(filename, "r") as f:
+        for line in f:
 
-        for j, duty in enumerate(duties):
+            # New height
+            match = height_re.match(line)
+            if match:
+                current_height = float(match.group(1))
+                data[current_height] = {}
+                current_index = None
+                continue
 
-            if duty in depth_blocks[depth]:
-                matrix[i, j] = depth_blocks[depth][duty]
+            # New index
+            match = index_re.match(line)
+            if match:
+                if current_height is None:
+                    continue
 
-    return depths, duties, matrix
+                current_index = float(match.group(1))
+                continue
+
+            # Requested parameter
+            match = parameter_re.match(line)
+            if match:
+                if current_height is None or current_index is None:
+                    continue
+
+                value = float(match.group(1))
+                data[current_height][current_index] = value
+
+    if not data:
+        raise ValueError("No Height blocks found in the input file.")
+
+    # Collect all indices and sort them
+    indices = sorted({
+        index
+        for height_data in data.values()
+        for index in height_data
+    })
+
+    heights = sorted(data.keys())
+
+    # Build matrix
+    matrix = []
+
+    for height in heights:
+        row = []
+
+        for index in indices:
+            if index not in data[height]:
+                row.append(None)
+            else:
+                row.append(data[height][index])
+
+        matrix.append(row)
+
+    return matrix, heights, indices
 
 
-def print_matrix(matrix):
-    """
-    Print matrix with:
-        - one row per line
-        - comma after every value
-        - comma after every row
+def main():
+    parser = argparse.ArgumentParser(
+        description="Extract a parameter matrix from simulation output."
+    )
 
-    Example:
+    parser.add_argument(
+        "input_file",
+        help="Input simulation output file"
+    )
 
-    [
-        [1.0, 2.0, 3.0, ],
-        [4.0, 5.0, 6.0, ],
-    ]
-    """
+    parser.add_argument(
+        "parameter",
+        help="Parameter to extract, e.g. PR, PL, 0L, 1R"
+    )
 
-    print("[")
+    args = parser.parse_args()
 
+    matrix, heights, indices = extract_matrix(
+        args.input_file,
+        args.parameter
+    )
+
+    print('[')
     for row in matrix:
+        print(row, ',')
+    print(']')
 
-        print("    [", end="")
-
-        for value in row:
-            print(f"{value}, ", end="")
-
-        print("],")
-
-    print("]")
-
-
-# =================================================================
-# Main
-# =================================================================
 
 if __name__ == "__main__":
+    main()
+"""
 
-    # -------------------------------------------------------------
-    # Check command line arguments
-    # -------------------------------------------------------------
+import re
+import sys
+
+
+def extract_parameter(filename, parameter):
+    """
+    Extract all values corresponding to `parameter` from the file.
+
+    Example:
+        extract_parameter("results.txt", "PR")
+    """
+    pattern = rf"^\s*{re.escape(parameter)}:\s*([-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?)"
+
+    values = []
+
+    with open(filename, "r") as f:
+        for line in f:
+            match = re.match(pattern, line)
+            if match:
+                values.append(float(match.group(1)))
+
+    return values
+
+
+if __name__ == "__main__":
     if len(sys.argv) != 3:
-
-        print(
-            f"Usage: {sys.argv[0]} <input_file> <parameter>"
-        )
-
-        print(
-            f"Example: {sys.argv[0]} output.txt PR"
-        )
-
+        print("Usage: python extract_parameter.py <input_file> <parameter>")
         sys.exit(1)
 
-    # -------------------------------------------------------------
-    # Get arguments
-    # -------------------------------------------------------------
     filename = sys.argv[1]
     parameter = sys.argv[2]
 
-    # -------------------------------------------------------------
-    # Extract matrix
-    # -------------------------------------------------------------
-    depths, duties, matrix = extract_matrix(
-        filename,
-        parameter
-    )
+    values = extract_parameter(filename, parameter)
 
-    # -------------------------------------------------------------
-    # Print information
-    # -------------------------------------------------------------
-    print(f"\nParameter: {parameter}")
-    print(f"Number of depth factors: {len(depths)}")
-    print(f"Number of duty cycles:   {len(duties)}")
-
-    print("\nMatrix:")
-
-    # -------------------------------------------------------------
-    # Print matrix
-    # -------------------------------------------------------------
-    print_matrix(matrix)
+    print(f"{parameter} = {values}")

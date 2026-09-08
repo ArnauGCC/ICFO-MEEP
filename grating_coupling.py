@@ -4,6 +4,7 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 import copy
+from enum import Enum, auto
 from packages.figures import *
 from packages.utils import *
 
@@ -91,6 +92,7 @@ class GratingCoupler:
 	run_meep = True							# Runs the simulation, False to check geometry
 	do_plots = False						# True:	Plots the geometry (and fields if run_meep)
 	end_src = False							# Computes efficencies turning on and off the source
+	grating_excaved = True					# If true: the grating is a layer with holes, else: is a layer with a crest
 	compute_eff_by_modes = True				# True: Computes the efficiency of the first n_modes_to_compute of the waveguide
 	compute_eff_by_power = True				# True: Computes the efficiency with the total power
 	compute_src_time = True					# True: src_time is computed in main(), else: src_time is set manual
@@ -122,11 +124,17 @@ class GratingCoupler:
 	n_default = 1							# Default refraction index for the simulation
 	n_modes_to_compute = 1					# If compute_by_modes_not_power, then efficiency is computed by the first n_modes_to_compute
 
+	class Region(Enum):
+		LEFT = auto()
+		CENTER = auto()
+		RIGHT = auto()
+
 	res_factor = 20							# Number of pixels for wavelength in the highest refraction index 
 	manual_res = 70							# if set_manual_resolution, resolution = manual_res
 	src_time = -1							# if not compute_src_time, is assumed a converged state after src_time time units to compute efficiency
 	src_power = -1							# if not compute_src_power, then must specify src_flux to compute efficiency
 	width_sim_scale = 1						# Factor to make simulation wider (useful to avoid the apparition of reflection and radtiated fields in measuring regions)
+	width_expansion: Region = Region.CENTER	# Indicates where the expasion of width sim scale is done, for example: center --> the left and right side became bigger by the same amount, but if you are interested in the right region efficiency: right --> increments the size only in the right region
 	h5_frames_per_wlength = 4				# Number of frames per wavelength in the h5 files
 	h5_name = ""							# output h5 files have h5_name
 
@@ -178,15 +186,17 @@ class GratingCoupler:
 		elif self.wg_layer is None:		self.set_wg_layer()
 
 
-		if self.wg_layer == 0:			return self.eff_params.grat_height
+		if self.wg_layer == 0:			return self.eff_params.grat_height if self.grating_excaved else self.eff_params.grat_height*(1-self.eff_params.grat_depth_factor)
 		else:							return self.bottom_layers[self.wg_layer-1].height
 
 
 
-	def comp_resolution(self, res_factor=res_factor, freq=src_freq):
+	def comp_resolution(self, res_factor=None, freq=None):
 		"""
 		Computes the resolution needed to guarantee res_factor pixels in the highest refractive index of the simulation
 		"""
+		if res_factor is None:	res_factor = self.res_factor
+		if freq is None:		freq = self.src_freq
 		return int(res_factor * self.n_max() * freq)
 
 
@@ -266,7 +276,7 @@ class GratingCoupler:
 		dpml = 1
 
 
-		sx = int(self.eff_params.n_cells*gp*2.25)
+		sx = int(self.eff_params.n_cells*gp*2 + abs(pad_src_wg*math.tan(math.radians(self.eff_params.theta_deg))))
 		grat_height = self.eff_params.grat_height
 		sy = grat_height+2*dpml+pad_src_wg
 		for l in self.bottom_layers:
@@ -274,21 +284,33 @@ class GratingCoupler:
 			sy += l.height
 		sy = int(sy+pad_inf)
 
-		offsx = -sx*(self.width_sim_scale-1)/2		# the scale factor to increment the width sim only adds space between the grating and the right region
+		if self.width_expansion == self.Region.CENTER:
+			offsx = 0
+		elif self.width_expansion == self.Region.RIGHT:
+			offsx = -sx*(self.width_sim_scale-1)/2		# the scale factor to increment the width sim only adds space between the grating and the right region
+		elif self.width_expansion == self.Region.LEFT:
+			offsx = sx*(self.width_sim_scale-1)/2
+		else:
+			raise Exception("width_sim_scale must be a Region.")
 
-		grating = Layer(self.n_grat, height=grat_height, width=self.grat_width)
 		theta = math.radians(90 - self.eff_params.theta_deg)
-		grat_y = sy/2 - dpml - pad_src_wg - grat_height/2
-		geometry = create_h_grating(gp, gh, gdc, self.eff_params.n_cells, grating, mp.Vector3(-sx/4 + pad_src_wg*0.9*math.tan(math.radians(self.eff_params.theta_deg)) + offsx, grat_y), n_ext=self.n_default)
+		if self.grating_excaved:
+			grating = Layer(self.n_grat, height=grat_height, width=self.grat_width)
+			grat_y = sy/2 - dpml - pad_src_wg - grat_height/2
+		else:
+			grating = Layer(self.n_grat, height=grat_height*(1-self.eff_params.grat_depth_factor), width=self.grat_width)
+			grat_y = sy/2 - dpml - pad_src_wg - (grat_height+gh)/2
+		geometry = create_h_grating(gp, gh, gdc, self.eff_params.n_cells, grating, mp.Vector3(-sx/4 + pad_src_wg*math.tan(math.radians(self.eff_params.theta_deg)) + offsx, grat_y), n_ext=self.n_default, excaved=self.grating_excaved)
+
 		wg_y = grat_y
 		if self.wg_layer is None: self.set_wg_layer()
 		i = 1
-		bottom = grat_y - grat_height/2
+		bottom = grat_y - grating.height/2
 		for l in self.bottom_layers:
 			if l.height == mp.inf:
 				if i == self.wg_layer:
-					wg_y = bottom - pad_inf/2
-				geometry.append(create_h_waveguide(bottom - pad_inf/2, pad_inf, l.index))
+					wg_y = -sy/2 + abs(-sy/2 - bottom)/2
+				geometry.append(create_h_waveguide(-sy/2 + abs(-sy/2 - bottom)/2, abs(-sy/2 - bottom), l.index))
 				break
 			if i == self.wg_layer:
 				wg_y = bottom - l.height/2
@@ -340,8 +362,8 @@ class GratingCoupler:
 											 tolerance=1e-5, min_field=50, err_rate=5000, max_time=self.time_until_stop_convergence)
 
 
-		wg_fr_left = mp.FluxRegion(center=mp.Vector3(-sx/2 + 2*dpml, wg_y), size=mp.Vector3(y=wg_height*3), direction=mp.X)
-		wg_fr_right = mp.FluxRegion(center=mp.Vector3(sx/2 - 2*dpml, wg_y), size=mp.Vector3(y=wg_height*3), direction=mp.X)
+		wg_fr_left = mp.FluxRegion(center=mp.Vector3(-sx/2 + 2*dpml, wg_y), size=mp.Vector3(y=wg_height*1), direction=mp.X)
+		wg_fr_right = mp.FluxRegion(center=mp.Vector3(sx/2 - 2*dpml, wg_y), size=mp.Vector3(y=wg_height*1), direction=mp.X)
 
 		
 		return src_fr, src_stop_cond, stop_cond, wg_fr_left, wg_fr_right
@@ -523,6 +545,7 @@ class GratingCoupler:
 		"""
 		Sets the value of a global parameter
 		"""
+		if param not in self.get_variables(): raise Exception("param must be a string in get_variables().")
 		setattr(self.eff_params, param, value)
 
 
@@ -661,9 +684,24 @@ class GratingCoupler:
 		return opt_values
 
 
-	def scan_all_parameters(self, freq=src_freq, opt_params: EffParams=EffParams()):
+	def scan_all_parameters(self, freq=None, opt_params: EffParams=EffParams()):
+		"""
+		Computes the efficiency of a given frequency (global parameter) between two values of a 
+		variable in self.eff_parameter (to get the list of variables use: get_variables())
+		
+		opt_params can be used to fix a value when optimizing the other ones or to sepcifiy manually an 
+		interval of search for a parameter otherwise, self.default_intervals_search will be used.
+		
+		Partial results are printed in the created file output.txt
+		Returns two NamedMatrixs: The first one corresponds to the efficiencies, and the second one to the steps
+		A NamedMatrix has two fields: NamedMatrix.data (which is the data stored) and NamedMatrix.dims that shows
+		the meaning of each dimension stored. (to print, this fields must be printed separatedly).
+		"""
 
-		self.src_freq = freq
+		if freq is None:
+			freq = self.src_freq
+		else:
+			self.src_freq = freq
 		fields = dataclasses.fields(opt_params)
 		i = 0
 
@@ -785,6 +823,108 @@ class GratingCoupler:
 
 
 		return freqs, result
+
+
+	def check_simulation_convergence_changing_res(self, res_step=5, min_res_factor = 20, tolerance=0.001, param_to_check='PR'):
+		self.compute_eff_by_power = True
+		self.compute_src_power = True
+		self.run_meep = True
+		self.set_manual_resolution = False
+		self.do_plots = False
+		self.res_factor = min_res_factor
+
+
+		res = self.main()
+		if param_to_check not in res:
+			raise Exception("param_to_check must be the key one of the results of main(), e.g. 'PR', 'S', etc.")
+
+		hist_res = {key: [] for key in res}
+
+		write_output(f"\nRES_FACTOR: {self.res_factor} --> RESOLUTION = {self.comp_resolution()}")
+		for key in hist_res:
+			hist_res[key].append(res[key] if key in res else np.float64(0))
+			write_output(f"    {key}: {hist_res[key][-1]}")
+
+
+		res_factors = [self.res_factor]
+		resolutions = [self.comp_resolution()]
+
+		while len(hist_res[param_to_check]) == 1 or abs(hist_res[param_to_check][-1] - hist_res[param_to_check][-2])/hist_res[param_to_check][-1] > tolerance:
+			self.res_factor += res_step
+			res = self.main()
+			for key in res:
+				if key not in hist_res:
+					hist_res[key] = [0]*len(hist_res[next(iter(hist_res))])
+
+			write_output("----------------------------------")
+			write_output(f"RES_FACTOR: {self.res_factor} --> RESOLUTION = {self.comp_resolution()}")
+			for key in hist_res:
+				hist_res[key].append(res[key] if key in res else np.float64(0))
+				write_output(f"    {key}: {hist_res[key][-1]}")
+
+			res_factors.append(self.res_factor)
+			resolutions.append(self.comp_resolution())
+
+
+		write_output("\n\n----------------------------------")
+		write_output("FINAL RESULT")
+		write_output(f"RES_FACTORs: {res_factors}")
+		write_output(f"RESOLUTIONs: {resolutions}\n")
+		for key in hist_res:
+			write_output(f"{key}:")
+			write_output(hist_res[key])
+
+		return res_factors, resolutions, hist_res
+
+
+	def check_simulation_convergence_changing_n_cells(self, cells_step=4, min_cells=20, tolerance=0.01, param_to_check='PR'):
+		self.compute_eff_by_power = True
+		self.compute_src_power = True
+		self.run_meep = True
+		self.end_src = False
+		self.set_manual_resolution = False
+		self.do_plots = False
+		self.eff_params.n_cells = min_cells
+
+		res = self.main()
+		if param_to_check not in res:
+			raise Exception("param_to_check must be the key one of the results of main(), e.g. 'PR', 'S', etc.")
+
+		hist_res = {key: [] for key in res}
+
+		write_output(f"\nN_CELLS: {self.eff_params.n_cells}")
+		for key in hist_res:
+			hist_res[key].append(res[key] if key in res else np.float64(0))
+			write_output(f"    {key}: {hist_res[key][-1]}")
+
+
+		cells = [self.eff_params.n_cells]
+
+		while len(hist_res[param_to_check]) == 1 or abs(hist_res[param_to_check][-1] - hist_res[param_to_check][-2])/hist_res[param_to_check][-1] > tolerance:
+			self.eff_params.n_cells += cells_step
+			res = self.main()
+
+			for key in res:
+				if key not in hist_res:
+					hist_res[key] = [0]*len(hist_res[next(iter(hist_res))])
+
+			write_output("----------------------------------")
+			write_output(f"N_CELLS: {self.eff_params.n_cells}")
+			for key in hist_res:
+				hist_res[key].append(res[key] if key in res else np.float64(0))
+				write_output(f"    {key}: {hist_res[key][-1]}")
+
+			cells.append(self.eff_params.n_cells)
+
+
+		write_output("\n\n----------------------------------")
+		write_output("FINAL RESULT")
+		write_output(f"N_CELLS: {cells}\n")
+		for key in hist_res:
+			write_output(f"{key}:")
+			write_output(hist_res[key])
+
+		return cells, hist_res
 
 
 if __name__ == "__main__":
